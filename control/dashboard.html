@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Formica</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f1e28'/%3E%3Ccircle cx='32' cy='20' r='7' fill='%23f0b54a'/%3E%3Cellipse cx='32' cy='34' rx='6' ry='7' fill='%23f0b54a'/%3E%3Cellipse cx='32' cy='49' rx='9' ry='10' fill='%23f0b54a'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0f1e28; --surface: #152936; --surface-2: #1b3242; --line: #25404f;
+    --text: #e4edf2; --muted: #8ca3b2; --good: #5fd39a; --warn: #f0b54a; --bad: #ef6f6f;
+    --focus: #8fd3ff; --accent: #f0b54a; --radius-l: 14px; --radius-s: 6px;
+    font-family: system-ui, "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
+    font-size: 15px; line-height: 1.45; color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #eef3f6; --surface: #fff; --surface-2: #f4f8fa; --line: #d3dee5; --text: #12242f;
+            --muted: #587080; --good: #1f9d63; --warn: #b9780d; --bad: #c73e3e; --focus: #1d6fb8;
+            --accent: #b9780d; color-scheme: light; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 22px 48px; }
+  h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  h1 { font-size: 1.35rem; } h2 { font-size: 1.05rem; } h3 { font-size: .95rem; }
+  .muted { color: var(--muted); } .small { font-size: .88rem; }
+  .num { font-variant-numeric: tabular-nums; }
+  a { color: var(--focus); }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 34px; height: 34px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  nav.tabs { display: flex; gap: 4px; margin: 22px 0 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  nav.tabs button { background: none; border: 0; color: var(--muted); padding: 10px 14px; cursor: pointer;
+                    border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  nav.tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 18px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .stack > * + * { margin-top: 14px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin-top: 10px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; }
+  button.btn, a.btn { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px;
+       border-radius: var(--radius-s); border: 1px solid var(--line); background: var(--surface-2);
+       color: var(--text); cursor: pointer; text-decoration: none; white-space: nowrap; }
+  button.btn:hover, a.btn:hover { border-color: var(--muted); }
+  button.btn.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1405; font-weight: 600; }
+  button.btn.small { padding: 4px 9px; font-size: .85rem; }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 11px; border-radius: 999px;
+          background: var(--surface); border: 1px solid var(--line); font-size: .88rem; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
+  .dot.ok { background: var(--good); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+  .dot.busy { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: .85rem; }
+  tr:last-child td { border-bottom: 0; }
+  td.right { text-align: right; white-space: nowrap; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px;
+        overflow: auto; max-height: 520px; font-size: .82rem; line-height: 1.4; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  form .row { display: grid; grid-template-columns: 220px 1fr; gap: 6px 16px; align-items: start; padding: 10px 0;
+              border-bottom: 1px solid var(--line); }
+  form .row:last-child { border-bottom: 0; }
+  @media (max-width: 720px) { form .row { grid-template-columns: 1fr; } }
+  label.lbl { padding-top: 7px; font-weight: 550; }
+  .hint { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+  input[type=text], input[type=password], input[type=number], input[type=email], select {
+    font: inherit; width: 100%; max-width: 460px; padding: 7px 10px; border-radius: var(--radius-s);
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  input[type=number] { max-width: 140px; }
+  .choices { display: grid; gap: 8px; max-width: 620px; }
+  .choice { display: flex; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-s);
+            cursor: pointer; background: var(--bg); }
+  .choice:has(input:checked) { border-color: var(--accent); }
+  .choice input { margin-top: 4px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; padding-top: 6px; cursor: pointer; }
+  .msg { padding: 10px 14px; border-radius: var(--radius-s); border: 1px solid var(--line); background: var(--surface-2); }
+  .msg.bad { border-color: var(--bad); } .msg.ok { border-color: var(--good); } .msg.warn { border-color: var(--warn); }
+  .msg ul { margin: 6px 0 0; padding-left: 20px; }
+  .center { min-height: 80vh; display: grid; place-items: center; }
+  .auth { width: min(420px, 100%); }
+  .auth .stack input { max-width: none; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-2);
+         border: 1px solid var(--line); font-size: .8rem; margin: 2px 4px 2px 0; }
+  .hidden { display: none !important; }
+  .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 4px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="ant" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0f1e28"/>
+    <g fill="#f0b54a"><circle cx="32" cy="18" r="7"/><ellipse cx="32" cy="32" rx="6" ry="7"/><ellipse cx="32" cy="48" rx="9" ry="10"/></g>
+    <g stroke="#f0b54a" stroke-width="2.4" stroke-linecap="round" fill="none">
+      <path d="M27 13 L21 6 M37 13 L43 6 M27 31 L14 25 M37 31 L50 25 M27 35 L13 41 M37 35 L51 41 M28 40 L18 54 M36 40 L46 54"/></g></symbol>
+</defs></svg>
+
+<!-- Einrichtung -->
+<div id="v-setup" class="center hidden">
+  <div class="card auth stack">
+    <div class="brand"><svg class="logo"><use href="#ant"/></svg><h1>Formica einrichten</h1></div>
+    <p class="muted small">Den Einrichtungscode zeigt die Installation an. Auf dem Server jederzeit mit <code>sudo formica token</code>.</p>
+    <input id="s-token" type="text" placeholder="Einrichtungscode" autocomplete="off">
+    <input id="s-pw" type="password" placeholder="Admin-Passwort (mind. 10 Zeichen)" autocomplete="new-password">
+    <input id="s-pw2" type="password" placeholder="Passwort wiederholen" autocomplete="new-password">
+    <div id="s-msg"></div>
+    <button class="btn primary" onclick="doSetup()">Weiter</button>
+  </div>
+</div>
+
+<!-- Anmeldung -->
+<div id="v-login" class="center hidden">
+  <div class="card auth stack">
+    <div class="brand"><svg class="logo"><use href="#ant"/></svg><h1>Formica</h1></div>
+    <input id="l-pw" type="password" placeholder="Admin-Passwort" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')doLogin()">
+    <div id="l-msg"></div>
+    <button class="btn primary" onclick="doLogin()">Anmelden</button>
+  </div>
+</div>
+
+<!-- Oberfläche -->
+<div id="v-app" class="wrap hidden">
+  <header class="top">
+    <div class="brand"><svg class="logo"><use href="#ant"/></svg>
+      <div><h1 id="h-name">Formica</h1><div class="muted small">KI-Arbeitsplatz · Version <span id="h-ver"></span></div></div></div>
+    <div class="actions">
+      <span class="pill" id="h-status"><span class="dot"></span><span>…</span></span>
+      <a class="btn" id="h-open" target="_blank" rel="noopener">Open WebUI öffnen ↗</a>
+      <button class="btn primary" id="b-apply" onclick="apply(false)">Übernehmen</button>
+      <button class="btn" onclick="logout()">Abmelden</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-t="overview" class="on">Übersicht</button>
+    <button data-t="settings">Einstellungen</button>
+    <button data-t="logs">Logs</button>
+    <button data-t="files">Dateien</button>
+  </nav>
+
+  <div id="pending" class="msg warn hidden" style="margin-bottom:14px"></div>
+
+  <!-- Übersicht -->
+  <section id="t-overview" class="stack">
+    <div class="grid">
+      <div class="card"><h2>Zugriff</h2>
+        <dl class="kv"><dt>Adresse</dt><dd><a id="o-url" target="_blank" rel="noopener"></a></dd>
+          <dt>Art</dt><dd id="o-access"></dd></dl></div>
+      <div class="card"><h2>Modell-Backend</h2>
+        <dl class="kv"><dt>Adresse</dt><dd id="o-backend" class="small"></dd><dt>Status</dt><dd id="o-bstate">…</dd></dl>
+        <div id="o-models" style="margin-top:8px"></div></div>
+      <div class="card"><h2>System</h2>
+        <dl class="kv num" id="o-sys"></dl></div>
+    </div>
+
+    <div class="card">
+      <div class="flex" style="justify-content:space-between"><h2>Dienste</h2>
+        <button class="btn small" onclick="apply(true)" title="Neue Images laden und neu starten">Images aktualisieren</button></div>
+      <table style="margin-top:8px"><thead><tr><th></th><th>Dienst</th><th>Status</th><th class="small">Image</th><th></th></tr></thead>
+        <tbody id="o-svc"></tbody></table>
+    </div>
+
+    <div class="card hidden" id="job">
+      <div class="flex" style="justify-content:space-between"><h2 id="job-title">Vorgang</h2><span id="job-state" class="pill"></span></div>
+      <pre id="job-out" style="margin-top:10px"></pre>
+    </div>
+  </section>
+
+  <!-- Einstellungen -->
+  <section id="t-settings" class="hidden stack">
+    <div id="f-msg"></div>
+    <form id="form" onsubmit="return false" class="stack">
+      <div class="card"><h2>Allgemein</h2>
+        <div class="row"><label class="lbl" for="general.name">Name</label>
+          <div><input type="text" id="general.name"><div class="hint">Erscheint als Titel in Open WebUI.</div></div></div>
+        <div class="row"><label class="lbl" for="general.host">Hostname oder IP</label>
+          <div><input type="text" id="general.host" placeholder="z. B. ki.firma.intern oder 192.168.2.50">
+            <div class="hint">So rufen die Benutzer Formica im Browser auf.</div></div></div>
+      </div>
+
+      <div class="card"><h2>Zugriff und Zertifikat</h2>
+        <div class="row"><span class="lbl">Betriebsart</span>
+          <div class="choices">
+            <label class="choice"><input type="radio" name="access" value="http">
+              <div><b>Nur HTTP</b><div class="hint">Zum Testen im Heimnetz. Kein Zertifikat, Passwörter gehen unverschlüsselt durchs Netz.</div></div></label>
+            <label class="choice"><input type="radio" name="access" value="internal">
+              <div><b>HTTPS mit eigener Zertifizierungsstelle</b><div class="hint">Caddy stellt das Zertifikat selbst aus. Das Stammzertifikat einmal auf den Clients verteilen (z. B. per GPO).</div></div></label>
+            <label class="choice"><input type="radio" name="access" value="acme">
+              <div><b>HTTPS mit Let's Encrypt</b><div class="hint">Braucht einen öffentlichen DNS-Namen und Port 80/443 aus dem Internet erreichbar.</div></div></label>
+            <label class="choice"><input type="radio" name="access" value="proxy">
+              <div><b>Hinter vorhandenem Reverse Proxy</b><div class="hint">Der Proxy der Firma macht HTTPS und leitet per HTTP an diesen Server weiter.</div></div></label>
+          </div></div>
+        <div class="row"><label class="lbl" for="general.http_port">HTTP-Port</label><div><input type="number" id="general.http_port"></div></div>
+        <div class="row acc-https"><label class="lbl" for="general.https_port">HTTPS-Port</label><div><input type="number" id="general.https_port"></div></div>
+        <div class="row acc-acme"><label class="lbl" for="general.acme_email">E-Mail für Let's Encrypt</label><div><input type="email" id="general.acme_email"></div></div>
+        <div class="row acc-proxy"><label class="lbl" for="general.trusted_proxies">IP des Reverse Proxys</label>
+          <div><input type="text" id="general.trusted_proxies" placeholder="z. B. 10.10.1.5"><div class="hint">Nur Anfragen von dieser Adresse werden als weitergeleitet anerkannt. Mehrere mit Komma.</div></div></div>
+        <div class="row acc-internal"><span class="lbl">Stammzertifikat</span>
+          <div><a class="btn small" href="/api/root-cert">formica-root-ca.crt herunterladen</a><div class="hint">Erst verfügbar, wenn Caddy einmal mit dieser Betriebsart gestartet ist.</div></div></div>
+      </div>
+
+      <div class="card"><h2>Modell-Backend</h2>
+        <div class="row"><label class="lbl" for="backend.url">Adresse</label>
+          <div><input type="text" id="backend.url" placeholder="http://192.168.2.243:8080/v1">
+            <div class="hint">MyrmidLM-Master (Port 8080) oder ein anderes OpenAI-kompatibles Backend (vLLM, Ollama, LiteLLM, OpenRouter).</div></div></div>
+        <div class="row"><label class="lbl" for="backend.key">API-Key</label>
+          <div><input type="password" id="backend.key" autocomplete="off">
+            <div class="hint" id="key-hint">Beim MyrmidLM-Master anzeigen mit <code>sudo myrmid key</code>.</div></div></div>
+        <div class="row"><span class="lbl"></span>
+          <div><button class="btn small" onclick="testBackend()">Verbindung testen</button><div id="t-res" style="margin-top:8px"></div></div></div>
+      </div>
+
+      <div class="card"><h2>Dokumente und Wissensdatenbank</h2>
+        <div class="row"><span class="lbl">Docling</span>
+          <div><label class="switch"><input type="checkbox" id="rag.docling"> Dokumente mit Docling lesen (Tabellen, Layout, Texterkennung)</label>
+            <div class="hint">Aus: einfache Textextraktion von Open WebUI. Tabellen gehen dabei verloren.</div></div></div>
+        <div class="row"><label class="lbl" for="rag.docling_workers">Docling-Worker</label>
+          <div><input type="number" id="rag.docling_workers" min="1" max="16"><div class="hint">Mehr Worker verarbeiten mehr Dateien gleichzeitig, brauchen aber mehr CPU und RAM.</div></div></div>
+        <div class="row"><label class="lbl" for="rag.embedding_model">Embedding-Modell</label>
+          <div><input type="text" id="rag.embedding_model"><div class="hint">Hugging-Face-Repo im GGUF-Format. Achtung: Nach einem Wechsel müssen alle Dokumente neu indexiert werden.</div></div></div>
+        <div class="row"><label class="lbl" for="rag.chunk_size">Chunk-Größe</label>
+          <div><input type="number" id="rag.chunk_size"><div class="hint">Zeichen pro Abschnitt. 1000 ≈ ein bis zwei Absätze.</div></div></div>
+        <div class="row"><label class="lbl" for="rag.chunk_overlap">Overlap</label><div><input type="number" id="rag.chunk_overlap"></div></div>
+        <div class="row"><label class="lbl" for="rag.top_k">Top K</label>
+          <div><input type="number" id="rag.top_k"><div class="hint">Abschnitte pro Frage, die an das Modell gehen.</div></div></div>
+        <div class="row"><span class="lbl">Hybrid-Suche</span>
+          <div><label class="switch"><input type="checkbox" id="rag.hybrid"> Zusätzlich Stichwortsuche (gut für Artikelnummern)</label></div></div>
+      </div>
+
+      <div class="card"><h2>Benutzer</h2>
+        <div class="row"><span class="lbl">Registrierung</span>
+          <div><label class="switch"><input type="checkbox" id="users.signup"> Benutzer dürfen sich selbst registrieren</label>
+            <div class="hint">Das erste Konto in Open WebUI wird Administrator. Anmeldung mit Entra ID folgt in Version 0.2.</div></div></div>
+        <div class="row"><label class="lbl" for="users.default_role">Rolle neuer Benutzer</label>
+          <div><select id="users.default_role"><option value="pending">Ausstehend (Admin schaltet frei)</option><option value="user">Benutzer (sofort Zugriff)</option></select></div></div>
+      </div>
+
+      <div class="flex"><button class="btn primary" onclick="saveConfig()">Speichern</button>
+        <span class="muted small">Danach oben auf „Übernehmen“, damit die Dienste neu starten.</span></div>
+    </form>
+
+    <div class="card"><h2>Admin-Passwort ändern</h2>
+      <div class="row" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+        <input type="password" id="pw-old" placeholder="Altes Passwort" style="max-width:220px">
+        <input type="password" id="pw-new" placeholder="Neues Passwort" style="max-width:220px">
+        <button class="btn" onclick="changePw()">Ändern</button></div>
+      <div id="pw-msg" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <!-- Logs -->
+  <section id="t-logs" class="hidden card">
+    <div class="flex"><select id="log-svc" style="max-width:240px"></select>
+      <select id="log-lines" style="max-width:120px"><option>100</option><option selected>300</option><option>1000</option><option>5000</option></select>
+      <button class="btn small" onclick="loadLogs()">Aktualisieren</button>
+      <label class="switch small"><input type="checkbox" id="log-follow"> alle 5 s</label></div>
+    <pre id="log-out" style="margin-top:12px">Dienst wählen …</pre>
+  </section>
+
+  <!-- Dateien -->
+  <section id="t-files" class="hidden stack">
+    <p class="muted small">Diese Dateien erzeugt Formica aus den Einstellungen. Genau das läuft auf dem Server (Passwörter ausgeblendet).</p>
+    <div class="card"><h2>stack/compose.yaml</h2><pre id="f-compose" style="margin-top:10px"></pre></div>
+    <div class="card"><h2>stack/caddy/Caddyfile</h2><pre id="f-caddy" style="margin-top:10px"></pre></div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const ACCESS = { http: "Nur HTTP", internal: "HTTPS (eigene CA)", acme: "HTTPS (Let's Encrypt)", proxy: "Hinter Reverse Proxy" };
+let CFG = null, TAB = "overview", jobTimer = null, svcTimer = null, logTimer = null;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (r.status === 401 && !path.startsWith("/api/state")) { show("login"); throw new Error("401"); }
+  data._status = r.status;
+  return data;
+}
+function msg(el, kind, text, list) {
+  $(el).innerHTML = text ? `<div class="msg ${kind}">${esc(text)}${list && list.length ? "<ul>" + list.map(x => `<li>${esc(x)}</li>`).join("") + "</ul>" : ""}</div>` : "";
+}
+function show(v) { for (const x of ["setup", "login", "app"]) $("v-" + x).classList.toggle("hidden", x !== v); }
+function fmtBytes(n) { if (!n && n !== 0) return "–"; const u = ["B","KB","MB","GB","TB"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return n.toFixed(i > 2 ? 1 : 0) + " " + u[i]; }
+
+async function boot() {
+  const s = await api("/api/state");
+  $("h-ver").textContent = s.version;
+  if (s.setup) { show("setup"); return; }
+  if (!s.auth) { show("login"); $("l-pw").focus(); return; }
+  show("app");
+  await loadConfig();
+  refreshAll();
+}
+
+async function doSetup() {
+  if ($("s-pw").value !== $("s-pw2").value) return msg("s-msg", "bad", "Die Passwörter stimmen nicht überein.");
+  const r = await api("/api/setup", { token: $("s-token").value, password: $("s-pw").value });
+  if (!r.ok) return msg("s-msg", "bad", r.error);
+  show("app"); await loadConfig(); switchTab("settings");
+  msg("f-msg", "ok", "Willkommen! Tragen Sie Hostname und Modell-Backend ein, speichern Sie und klicken Sie dann auf „Übernehmen“.");
+  refreshAll();
+}
+async function doLogin() {
+  const r = await api("/api/login", { password: $("l-pw").value });
+  if (!r.ok) return msg("l-msg", "bad", r.error);
+  $("l-pw").value = ""; msg("l-msg"); boot();
+}
+async function logout() { await api("/api/logout", {}); show("login"); }
+
+// ---------- Tabs ----------
+$("tabs").addEventListener("click", (e) => { const t = e.target.dataset.t; if (t) switchTab(t); });
+function switchTab(t) {
+  TAB = t;
+  for (const b of $("tabs").children) b.classList.toggle("on", b.dataset.t === t);
+  for (const id of ["overview", "settings", "logs", "files"]) $("t-" + id).classList.toggle("hidden", id !== t);
+  if (t === "files") loadFiles();
+  if (t === "logs" && $("log-svc").value) loadLogs();
+}
+
+// ---------- Config ----------
+function fields() { return [...$("form").querySelectorAll("input[id], select[id]")].filter(el => el.id.includes(".")); }
+async function loadConfig() {
+  const r = await api("/api/config");
+  CFG = r.config;
+  for (const el of fields()) {
+    const [sec, key] = el.id.split(".");
+    const v = CFG[sec]?.[key];
+    if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? "";
+  }
+  $("backend.key").value = "";
+  $("backend.key").placeholder = CFG.backend.key_set ? "gespeichert – leer lassen, um ihn zu behalten" : "";
+  for (const r2 of document.querySelectorAll("input[name=access]")) r2.checked = r2.value === CFG.general.access;
+  accessVisibility();
+  renderHeader(r);
+}
+function renderHeader(r) {
+  $("h-name").textContent = CFG.general.name || "Formica";
+  $("h-open").href = r.webui_url; $("o-url").href = r.webui_url; $("o-url").textContent = r.webui_url;
+  $("o-access").textContent = ACCESS[CFG.general.access];
+  $("o-backend").textContent = CFG.backend.url || "nicht eingetragen";
+  const p = $("pending");
+  if (r.errors && r.errors.length) { p.classList.remove("hidden"); p.innerHTML = "Noch einzurichten:<ul>" + r.errors.map(x => `<li>${esc(x)}</li>`).join("") + "</ul>"; }
+  else if (!r.applied) { p.classList.remove("hidden"); p.textContent = "Die Einstellungen sind vollständig. Klicken Sie auf „Übernehmen“, um alle Dienste zu starten. Beim ersten Mal lädt Docker einige Gigabyte."; }
+  else p.classList.add("hidden");
+}
+document.querySelectorAll("input[name=access]").forEach(r => r.addEventListener("change", accessVisibility));
+function accessVisibility() {
+  const a = document.querySelector("input[name=access]:checked")?.value || "http";
+  document.querySelectorAll(".acc-https").forEach(e => e.classList.toggle("hidden", !(a === "internal" || a === "acme")));
+  document.querySelectorAll(".acc-acme").forEach(e => e.classList.toggle("hidden", a !== "acme"));
+  document.querySelectorAll(".acc-proxy").forEach(e => e.classList.toggle("hidden", a !== "proxy"));
+  document.querySelectorAll(".acc-internal").forEach(e => e.classList.toggle("hidden", a !== "internal"));
+}
+function formData() {
+  const d = { general: {}, backend: {}, rag: {}, users: {} };
+  for (const el of fields()) {
+    const [sec, key] = el.id.split(".");
+    d[sec][key] = el.type === "checkbox" ? el.checked : (el.type === "number" ? Number(el.value) : el.value);
+  }
+  d.general.access = document.querySelector("input[name=access]:checked")?.value || "http";
+  return d;
+}
+async function saveConfig() {
+  const r = await api("/api/config", formData());
+  if (r._status !== 200) return msg("f-msg", "bad", r.error);
+  if (r.errors.length) msg("f-msg", "warn", "Gespeichert, aber noch nicht vollständig:", r.errors);
+  else msg("f-msg", "ok", "Gespeichert. Jetzt oben auf „Übernehmen“ klicken.");
+  await loadConfig();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+async function testBackend() {
+  $("t-res").innerHTML = '<span class="muted">Teste …</span>';
+  const r = await api("/api/test-backend", { url: $("backend.url").value, key: $("backend.key").value });
+  $("t-res").innerHTML = r.ok
+    ? `<div class="msg ok">Verbunden mit ${esc(r.url)}. Modelle: ${r.models.map(m => `<span class="tag">${esc(m)}</span>`).join("") || "keine"}</div>`
+    : `<div class="msg bad">${esc(r.error)}</div>`;
+}
+async function changePw() {
+  const r = await api("/api/password", { old: $("pw-old").value, new: $("pw-new").value });
+  msg("pw-msg", r.ok ? "ok" : "bad", r.ok ? "Passwort geändert." : r.error);
+  if (r.ok) { $("pw-old").value = ""; $("pw-new").value = ""; }
+}
+
+// ---------- Overview ----------
+async function refreshAll() { loadServices(); loadSystem(); checkBackend(); }
+async function checkBackend() {
+  if (!CFG?.backend?.url) { $("o-bstate").textContent = "–"; return; }
+  const r = await api("/api/test-backend", {});
+  $("o-bstate").innerHTML = r.ok ? '<span class="dot ok"></span> erreichbar' : `<span class="dot bad"></span> ${esc(r.error)}`;
+  $("o-models").innerHTML = r.ok ? r.models.map(m => `<span class="tag">${esc(m)}</span>`).join("") : "";
+}
+async function loadSystem() {
+  const s = await api("/api/system");
+  const mem = s.mem_total ? (1 - s.mem_avail / s.mem_total) : 0;
+  const disk = s.disk_total ? (1 - s.disk_free / s.disk_total) : 0;
+  $("o-sys").innerHTML = `
+    <dt>CPU-Last</dt><dd>${s.load ? s.load.map(x => x.toFixed(2)).join(" · ") : "–"} <span class="muted">(${s.cpus} Kerne)</span></dd>
+    <dt>RAM</dt><dd>${fmtBytes(s.mem_total - s.mem_avail)} / ${fmtBytes(s.mem_total)}<div class="bar"><i style="width:${(mem*100).toFixed(0)}%"></i></div></dd>
+    <dt>Speicher</dt><dd>${fmtBytes(s.disk_total - s.disk_free)} / ${fmtBytes(s.disk_total)}<div class="bar"><i style="width:${(disk*100).toFixed(0)}%"></i></div></dd>
+    <dt>Docker</dt><dd>${s.docker ? esc(s.docker) : '<span style="color:var(--bad)">nicht erreichbar</span>'}</dd>`;
+}
+function stateDot(s) {
+  if (!s.enabled) return '<span class="dot"></span>';
+  if (s.state === "running") return `<span class="dot ${s.health === "unhealthy" ? "bad" : (s.health === "starting" ? "busy" : "ok")}"></span>`;
+  if (s.state === "restarting" || s.state === "created") return '<span class="dot busy"></span>';
+  return '<span class="dot bad"></span>';
+}
+const STATE_DE = { running: "läuft", exited: "beendet", restarting: "startet neu", created: "erstellt", paused: "pausiert", dead: "abgestürzt", fehlt: "nicht gestartet", aus: "abgeschaltet" };
+async function loadServices() {
+  const r = await api("/api/services");
+  const svc = r.services;
+  $("o-svc").innerHTML = svc.map(s => `<tr>
+    <td style="width:22px">${stateDot(s)}</td>
+    <td><b>${esc(s.label)}</b><div class="muted small">${esc(s.desc)}</div></td>
+    <td class="small">${esc(STATE_DE[s.state] || s.state)}${s.status ? `<div class="muted">${esc(s.status)}</div>` : ""}</td>
+    <td class="small muted">${esc(s.image)}</td>
+    <td class="right">${s.enabled && s.state !== "fehlt" ? `
+      <button class="btn small" onclick="svcAction('${s.name}','restart')">Neustart</button>
+      ${s.state === "running" ? `<button class="btn small" onclick="svcAction('${s.name}','stop')">Stopp</button>` : `<button class="btn small" onclick="svcAction('${s.name}','start')">Start</button>`}
+      <button class="btn small" onclick="showLogs('${s.name}')">Logs</button>` : ""}</td></tr>`).join("");
+  if (!$("log-svc").options.length) $("log-svc").innerHTML = svc.map(s => `<option value="${s.name}">${esc(s.label)}</option>`).join("");
+  const enabled = svc.filter(s => s.enabled);
+  const up = enabled.filter(s => s.state === "running").length;
+  const dot = up === enabled.length ? "ok" : (up === 0 ? "bad" : "warn");
+  $("h-status").innerHTML = `<span class="dot ${r.job.running ? "busy" : dot}"></span><span>${r.job.running ? esc(r.job.name) + " …" : `${up} von ${enabled.length} Diensten laufen`}</span>`;
+  renderJob(r.job);
+  clearTimeout(svcTimer); svcTimer = setTimeout(loadServices, r.job.running ? 2500 : 10000);
+}
+async function svcAction(name, action) {
+  const r = await api(`/api/service/${name}/${action}`, {});
+  if (!r.ok) alertBox(r.output || r.error);
+  loadServices();
+}
+function alertBox(t) { $("job").classList.remove("hidden"); $("job-title").textContent = "Fehler"; $("job-state").innerHTML = '<span class="dot bad"></span> Fehler'; $("job-out").textContent = t; }
+function showLogs(name) { $("log-svc").value = name; switchTab("logs"); }
+
+// ---------- Apply ----------
+async function apply(pull) {
+  const r = await api(pull ? "/api/update" : "/api/apply", {});
+  if (!r.ok) { msg("f-msg", "bad", r.error, r.errors); if (r.errors) switchTab("settings"); return; }
+  switchTab("overview");
+  await loadConfig();
+  pollJob();
+}
+function renderJob(j) {
+  if (!j || !j.name) return;
+  $("job").classList.remove("hidden");
+  $("job-title").textContent = j.name;
+  $("job-state").innerHTML = j.running ? '<span class="dot busy"></span> läuft' : (j.ok ? '<span class="dot ok"></span> fertig' : '<span class="dot bad"></span> Fehler');
+  const out = $("job-out"), atEnd = out.scrollTop + out.clientHeight >= out.scrollHeight - 30;
+  out.textContent = j.lines.join("\n");
+  if (atEnd) out.scrollTop = out.scrollHeight;
+  $("b-apply").disabled = j.running;
+}
+async function pollJob() {
+  const j = await api("/api/job");
+  renderJob(j);
+  if (j.running) { clearTimeout(jobTimer); jobTimer = setTimeout(pollJob, 1500); }
+  else { loadServices(); checkBackend(); }
+}
+
+// ---------- Logs & files ----------
+async function loadLogs() {
+  const r = await api(`/api/logs/${$("log-svc").value}?lines=${$("log-lines").value}`);
+  const out = $("log-out");
+  out.textContent = r.log || "(keine Ausgabe)";
+  out.scrollTop = out.scrollHeight;
+}
+$("log-svc").addEventListener("change", loadLogs);
+$("log-follow").addEventListener("change", (e) => {
+  clearInterval(logTimer);
+  if (e.target.checked) logTimer = setInterval(() => { if (TAB === "logs") loadLogs(); }, 5000);
+});
+async function loadFiles() {
+  const r = await api("/api/files");
+  $("f-compose").textContent = r.compose || "Noch nicht erzeugt. Erst Einstellungen speichern und übernehmen.";
+  $("f-caddy").textContent = r.caddyfile || "–";
+}
+
+boot();
+</script>
+</body>
+</html>
