@@ -110,6 +110,17 @@ DEFAULTS = {
         "docling_workers": 2,
         "ocr": "auto",           # auto | force | off
     },
+    "chat": {
+        # Side tasks (search queries, titles, tags) go to the model as extra
+        # requests. With one model they wait in line and push the chat out of
+        # its prompt cache: a small model of their own keeps the chat fast.
+        "task_model": "",         # empty: the chat model itself
+        "query_generation": False,
+        "title": True,
+        "tags": False,
+        "follow_ups": True,
+        "autocomplete": False,
+    },
     "users": {
         "signup": True,           # users may register, the admin unlocks them
         "default_role": "pending",
@@ -298,6 +309,7 @@ def render_caddyfile(cfg: dict) -> str:
 
 def render_compose(cfg: dict) -> dict:
     g, b, r, u, s = cfg["general"], cfg["backend"], cfg["rag"], cfg["users"], cfg["secrets"]
+    c = cfg["chat"]
     https = g["access"] in ("internal", "acme")
 
     caddy_ports = [f"{int(g['http_port'])}:80"]
@@ -335,10 +347,17 @@ def render_compose(cfg: dict) -> dict:
         "RAG_RELEVANCE_THRESHOLD": "0",
         "ENABLE_RAG_HYBRID_SEARCH": "true" if r["hybrid"] else "false",
         "RAG_TEMPLATE": RAG_TEMPLATE,
+        "ENABLE_RETRIEVAL_QUERY_GENERATION": "true" if c["query_generation"] else "false",
+        "ENABLE_TITLE_GENERATION": "true" if c["title"] else "false",
+        "ENABLE_TAGS_GENERATION": "true" if c["tags"] else "false",
+        "ENABLE_FOLLOW_UP_GENERATION": "true" if c["follow_ups"] else "false",
+        "ENABLE_AUTOCOMPLETE_GENERATION": "true" if c["autocomplete"] else "false",
         "ANONYMIZED_TELEMETRY": "false",
         # Updates come with Formica (tested versions), not from the banner in Open WebUI
         "ENABLE_VERSION_UPDATE_CHECK": "false",
     }
+    if c["task_model"]:
+        webui_env["TASK_MODEL_EXTERNAL"] = c["task_model"]
     if r["docling"]:
         webui_env["CONTENT_EXTRACTION_ENGINE"] = "docling"
         webui_env["DOCLING_SERVER_URL"] = "http://docling:5001"

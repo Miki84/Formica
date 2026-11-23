@@ -1,5 +1,9 @@
 # Änderungen
 
+## 0.1.3
+- Neue Karte „Chat und Tempo“: eigenes Modell für Nebenaufgaben (z. B. fast), Suchanfragen, Titel, Tags, Folgefragen und Autovervollständigung einzeln schaltbar
+- Standard schneller: keine eigenen Suchanfragen, keine Tags, keine Autovervollständigung
+
 ## 0.1.2
 - Updates direkt in der Oberfläche: prüfen und mit einem Klick installieren, mit Rückfall auf die vorige Version
 - CPU-Auslastung in Prozent mit Balken statt Load-Werten

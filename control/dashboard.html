@@ -274,6 +274,23 @@
           <div><label class="switch"><input type="checkbox" id="rag.hybrid"> Zusätzlich Stichwortsuche (gut für Artikelnummern)</label></div></div>
       </div>
 
+      <div class="card"><h2>Chat und Tempo</h2>
+        <p class="hint">Open WebUI schickt neben jeder Antwort Nebenaufgaben an das Modell: Suchanfragen für die Dokumente, Titel, Tags, Folgefragen. Mit nur einem Modell warten diese Anfragen in der Schlange und verdrängen den Chat aus dem Prompt-Cache.</p>
+        <div class="row"><label class="lbl" for="chat.task_model">Modell für Nebenaufgaben</label>
+          <div><input type="text" id="chat.task_model" list="model-list" placeholder="leer = dasselbe Modell wie im Chat">
+            <datalist id="model-list"></datalist>
+            <div class="hint">Am besten ein kleines, schnelles Modell, bei MyrmidLM z. B. <code>fast</code>. Vorschläge kommen vom Backend.</div></div></div>
+        <div class="row"><span class="lbl">Suchanfragen erzeugen</span>
+          <div><label class="switch"><input type="checkbox" id="chat.query_generation"> Das Modell formuliert vor der Dokumentensuche eigene Suchbegriffe</label>
+            <div class="hint">Aus: Die Frage selbst wird gesucht. Spart einen kompletten Modellaufruf vor jeder Antwort.</div></div></div>
+        <div class="row"><span class="lbl">Weitere Nebenaufgaben</span>
+          <div style="display:grid;gap:4px">
+            <label class="switch"><input type="checkbox" id="chat.title"> Chat-Titel erzeugen</label>
+            <label class="switch"><input type="checkbox" id="chat.follow_ups"> Folgefragen vorschlagen</label>
+            <label class="switch"><input type="checkbox" id="chat.tags"> Tags erzeugen</label>
+            <label class="switch"><input type="checkbox" id="chat.autocomplete"> Autovervollständigung beim Tippen</label></div></div>
+      </div>
+
       <div class="card"><h2>Benutzer</h2>
         <div class="row"><span class="lbl">Registrierung</span>
           <div><label class="switch"><input type="checkbox" id="users.signup"> Benutzer dürfen sich selbst registrieren</label>
@@ -403,7 +420,7 @@ function accessVisibility() {
   document.querySelectorAll(".acc-internal").forEach(e => e.classList.toggle("hidden", a !== "internal"));
 }
 function formData() {
-  const d = { general: {}, backend: {}, rag: {}, users: {} };
+  const d = { general: {}, backend: {}, rag: {}, chat: {}, users: {} };
   for (const el of fields()) {
     const [sec, key] = el.id.split(".");
     d[sec][key] = el.type === "checkbox" ? el.checked : (el.type === "number" ? Number(el.value) : el.value);
@@ -498,6 +515,7 @@ async function checkBackend() {
   const r = await api("/api/test-backend", {});
   $("o-bstate").innerHTML = r.ok ? '<span class="dot ok"></span> erreichbar' : `<span class="dot bad"></span> ${esc(r.error)}`;
   $("o-models").innerHTML = r.ok ? r.models.map(m => `<span class="tag">${esc(m)}</span>`).join("") : "";
+  if (r.ok) $("model-list").innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join("");
 }
 async function loadSystem() {
   const s = await api("/api/system");
