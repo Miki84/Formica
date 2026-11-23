@@ -1,7 +1,7 @@
 # Formica control panel: Python (standard library) + docker CLI with compose.
 # It manages the other containers through the Docker socket of the host.
 FROM docker:cli
-RUN apk add --no-cache python3 tzdata
+RUN apk add --no-cache python3 tzdata git
 COPY VERSION /app/VERSION
 COPY control/ /app/
 ENV FORMICA_HOME=/opt/formica \

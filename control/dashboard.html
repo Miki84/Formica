@@ -5,18 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Formica</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f1e28'/%3E%3Ccircle cx='32' cy='20' r='7' fill='%23f0b54a'/%3E%3Cellipse cx='32' cy='34' rx='6' ry='7' fill='%23f0b54a'/%3E%3Cellipse cx='32' cy='49' rx='9' ry='10' fill='%23f0b54a'/%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem("formica-theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) { /* no storage: follow the system */ }</script>
 <style>
   :root {
-    --bg: #0f1e28; --surface: #152936; --surface-2: #1b3242; --line: #25404f;
-    --text: #e4edf2; --muted: #8ca3b2; --good: #5fd39a; --warn: #f0b54a; --bad: #ef6f6f;
-    --focus: #8fd3ff; --accent: #f0b54a; --radius-l: 14px; --radius-s: 6px;
+    /* wie MyrmidLM: dunkles Navy, ruhige Karten, Grün für gut, Bernstein für warm, Violett als Akzent */
+    --bg: #0a0f1a; --surface: #111827; --surface-2: #172033; --line: #1f2a3d;
+    --text: #e8edf5; --muted: #8b96aa; --good: #34d399; --warn: #fbbf24; --bad: #f87171;
+    --focus: #a78bfa; --accent: #a78bfa; --mem: #3b82f6;
+    --c0: #34d399; --c1: #fbbf24; --c2: #a78bfa; --c3: #f472b6; --c4: #60a5fa; --c5: #a3e635;
+    --radius-l: 14px; --radius-s: 6px;
     font-family: system-ui, "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
     font-size: 15px; line-height: 1.45; color-scheme: dark;
   }
   @media (prefers-color-scheme: light) {
-    :root { --bg: #eef3f6; --surface: #fff; --surface-2: #f4f8fa; --line: #d3dee5; --text: #12242f;
-            --muted: #587080; --good: #1f9d63; --warn: #b9780d; --bad: #c73e3e; --focus: #1d6fb8;
-            --accent: #b9780d; color-scheme: light; }
+    :root:not([data-theme="dark"]) {
+      --bg: #eef3f6; --surface: #ffffff; --surface-2: #f4f8fa; --line: #d3dee5;
+      --text: #12242f; --muted: #587080; --good: #1f9d63; --warn: #b9780d; --bad: #c73e3e;
+      --focus: #1d6fb8; --accent: #6c58d6; --mem: #2f6fd0;
+      --c0: #1d9c8e; --c1: #c98a12; --c2: #6c58d6; --c3: #cf4a6c; --c4: #2f86cc; --c5: #7a8f24;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #eef3f6; --surface: #ffffff; --surface-2: #f4f8fa; --line: #d3dee5;
+    --text: #12242f; --muted: #587080; --good: #1f9d63; --warn: #b9780d; --bad: #c73e3e;
+    --focus: #1d6fb8; --accent: #6c58d6; --mem: #2f6fd0;
+    --c0: #1d9c8e; --c1: #c98a12; --c2: #6c58d6; --c3: #cf4a6c; --c4: #2f86cc; --c5: #7a8f24;
+    color-scheme: light;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); }
@@ -40,19 +55,26 @@
   .stack > * + * { margin-top: 14px; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin-top: 10px; }
   .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; }
-  button.btn, a.btn { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px;
-       border-radius: var(--radius-s); border: 1px solid var(--line); background: var(--surface-2);
+  button.btn, a.btn { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px;
+       border-radius: 8px; border: 1px solid var(--line); background: transparent;
        color: var(--text); cursor: pointer; text-decoration: none; white-space: nowrap; }
   button.btn:hover, a.btn:hover { border-color: var(--muted); }
-  button.btn.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1405; font-weight: 600; }
-  button.btn.small { padding: 4px 9px; font-size: .85rem; }
+  button.btn.primary, a.btn.primary { background: var(--c0); border-color: var(--c0); color: #0f1e28; font-weight: 650; }
+  button.btn.primary:hover { filter: brightness(1.08); }
+  button.btn.small, a.btn.small { padding: 4px 10px; font-size: .82rem; }
+  .theme-btn { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px;
+               width: 32px; height: 32px; cursor: pointer; display: inline-grid; place-items: center; padding: 0; }
+  .theme-btn:hover { color: var(--text); }
+  .ver-badge { font-size: .8rem; font-weight: 650; padding: 3px 9px; border-radius: 999px; text-decoration: none; cursor: pointer;
+               border: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; background: none; }
+  .ver-badge.new { background: var(--c0); border-color: var(--c0); color: #0f1e28; }
   button.btn:disabled { opacity: .5; cursor: default; }
   .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 11px; border-radius: 999px;
           background: var(--surface); border: 1px solid var(--line); font-size: .88rem; white-space: nowrap; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
   .dot.ok { background: var(--good); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
-  .dot.busy { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
-  @keyframes pulse { 50% { opacity: .35; } }
+  .dot.busy { background: var(--good); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--good) 25%, transparent); } }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th { color: var(--muted); font-weight: 500; font-size: .85rem; }
@@ -86,8 +108,16 @@
          border: 1px solid var(--line); font-size: .8rem; margin: 2px 4px 2px 0; }
   .hidden { display: none !important; }
   .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 4px; }
-  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--line) 80%, transparent); overflow: hidden; margin-top: 5px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--c, var(--c0)); border-radius: 4px; transition: width .6s ease; }
+  .bar.hot > i { background: var(--warn); }
+  .bar.full > i { background: var(--bad); }
+  .cores { display: grid; grid-template-columns: repeat(auto-fill, minmax(10px, 1fr)); gap: 3px; margin-top: 6px; }
+  .cores i { display: block; height: 16px; border-radius: 2px; background: color-mix(in srgb, var(--line) 80%, transparent); position: relative; overflow: hidden; }
+  .cores i::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); background: var(--c0); }
+  .notes { margin: 8px 0 0; padding-left: 18px; font-size: .9rem; }
+  .notes li { margin: 2px 0; }
+  @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 </style>
 </head>
 <body>
@@ -126,7 +156,9 @@
 <div id="v-app" class="wrap hidden">
   <header class="top">
     <div class="brand"><svg class="logo"><use href="#ant"/></svg>
-      <div><h1 id="h-name">Formica</h1><div class="muted small">KI-Arbeitsplatz · Version <span id="h-ver"></span></div></div></div>
+      <div><h1 id="h-name">Formica</h1><div class="muted small">KI-Arbeitsplatz</div></div>
+      <button class="ver-badge" id="ver-badge" type="button" onclick="gotoUpdate()"></button>
+      <button class="theme-btn" id="theme-btn" type="button" title="Design"></button></div>
     <div class="actions">
       <span class="pill" id="h-status"><span class="dot"></span><span>…</span></span>
       <a class="btn" id="h-open" target="_blank" rel="noopener">Open WebUI öffnen ↗</a>
@@ -155,6 +187,14 @@
         <div id="o-models" style="margin-top:8px"></div></div>
       <div class="card"><h2>System</h2>
         <dl class="kv num" id="o-sys"></dl></div>
+    </div>
+
+    <div class="card" id="upd-card">
+      <div class="flex" style="justify-content:space-between"><h2>Formica-Version</h2>
+        <div class="flex"><button class="btn small" onclick="checkUpdate(true)">Auf Updates prüfen</button>
+          <button class="btn small primary hidden" id="upd-btn" onclick="selfUpdate()">Jetzt aktualisieren</button></div></div>
+      <div id="upd-info" class="small" style="margin-top:8px">…</div>
+      <pre id="upd-log" class="hidden" style="margin-top:10px"></pre>
     </div>
 
     <div class="card">
@@ -276,7 +316,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ACCESS = { http: "Nur HTTP", internal: "HTTPS (eigene CA)", acme: "HTTPS (Let's Encrypt)", proxy: "Hinter Reverse Proxy" };
-let CFG = null, TAB = "overview", jobTimer = null, svcTimer = null, logTimer = null;
+let VERSION = "", CFG = null, TAB = "overview", jobTimer = null, svcTimer = null, logTimer = null;
 
 async function api(path, body) {
   const opt = body === undefined ? {} : { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) };
@@ -295,7 +335,7 @@ function fmtBytes(n) { if (!n && n !== 0) return "–"; const u = ["B","KB","MB"
 
 async function boot() {
   const s = await api("/api/state");
-  $("h-ver").textContent = s.version;
+  VERSION = s.version;
   if (s.setup) { show("setup"); return; }
   if (!s.auth) { show("login"); $("l-pw").focus(); return; }
   show("app");
@@ -393,7 +433,66 @@ async function changePw() {
 }
 
 // ---------- Overview ----------
-async function refreshAll() { loadServices(); loadSystem(); checkBackend(); }
+async function refreshAll() { loadServices(); loadSystem(); checkBackend(); checkUpdate(false); }
+setInterval(() => { if (!$("v-app").classList.contains("hidden") && TAB === "overview") loadSystem(); }, 4000);
+
+// ---------- Theme (wie MyrmidLM) ----------
+const ICON = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const THEMES = [
+  ["", ICON('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>'), "automatisch (wie das System)"],
+  ["dark", ICON('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'), "dunkel"],
+  ["light", ICON('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'), "hell"]];
+function themeSet(t) {
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  try { if (t) localStorage.setItem("formica-theme", t); else localStorage.removeItem("formica-theme"); } catch (e) { /* not kept */ }
+  const th = THEMES.find((x) => x[0] === t) || THEMES[0];
+  $("theme-btn").innerHTML = th[1]; $("theme-btn").title = "Design: " + th[2] + " (klicken zum Wechseln)";
+}
+$("theme-btn").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme || "";
+  const i = THEMES.findIndex((x) => x[0] === cur);
+  themeSet(THEMES[(i + 1) % THEMES.length][0]);
+});
+themeSet(document.documentElement.dataset.theme || "");
+
+// ---------- Formica-Updates ----------
+function gotoUpdate() { switchTab("overview"); $("upd-card").scrollIntoView({ behavior: "smooth", block: "center" }); }
+async function checkUpdate(force) {
+  if (force) $("upd-info").textContent = "Prüfe …";
+  const u = await api("/api/update-check" + (force ? "?force=1" : ""));
+  const b = $("ver-badge");
+  b.textContent = u.available ? `Update ${u.latest}` : `v${u.current}`;
+  b.classList.toggle("new", !!u.available);
+  b.title = u.available ? "Neue Version verfügbar" : "Installierte Version";
+  $("upd-btn").classList.toggle("hidden", !(u.available && u.git));
+  let html = `Installiert: <b>${esc(u.current)}</b>`;
+  if (u.error) html += ` · <span style="color:var(--bad)">${esc(u.error)}</span>`;
+  else if (u.available) html += ` · Neu: <b style="color:var(--good)">${esc(u.latest)}</b>` +
+    u.notes.map(n => `<div style="margin-top:8px"><b>${esc(n.version)}</b><ul class="notes">${n.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>`).join("");
+  else if (u.latest) html += " · aktuell";
+  if (u.available && !u.git) html += `<div class="muted" style="margin-top:6px">Ohne Git installiert: Update auf dem Server mit <code>sudo formica update</code>.</div>`;
+  if (u.checked) html += `<div class="muted" style="margin-top:6px">Zuletzt geprüft: ${new Date(u.checked * 1000).toLocaleString("de-DE")}</div>`;
+  $("upd-info").innerHTML = html;
+}
+async function selfUpdate() {
+  if (!confirm("Formica jetzt aktualisieren? Die Oberfläche ist dabei etwa eine Minute nicht erreichbar. Open WebUI läuft weiter.")) return;
+  const r = await api("/api/self-update", {});
+  if (!r.ok) { $("upd-info").innerHTML = `<span style="color:var(--bad)">${esc(r.error)}</span>`; return; }
+  $("upd-btn").disabled = true;
+  $("upd-info").innerHTML = '<span class="dot busy"></span> Formica wird aktualisiert … die Seite lädt danach neu.';
+  const old = VERSION, t0 = Date.now();
+  const poll = async () => {
+    try {
+      const s = await (await fetch("/api/state", { cache: "no-store" })).json();
+      if (s.version && s.version !== old) { location.reload(); return; }
+    } catch (e) { /* während des Neustarts nicht erreichbar */ }
+    try { const l = await (await fetch("/api/update-log", { cache: "no-store" })).json();
+          if (l.log) { $("upd-log").classList.remove("hidden"); $("upd-log").textContent = l.log; } } catch (e) {}
+    if (Date.now() - t0 > 6 * 60 * 1000) { $("upd-info").innerHTML = '<span style="color:var(--bad)">Das Update dauert ungewöhnlich lange. Log siehe unten.</span>'; $("upd-btn").disabled = false; return; }
+    setTimeout(poll, 3000);
+  };
+  setTimeout(poll, 4000);
+}
 async function checkBackend() {
   if (!CFG?.backend?.url) { $("o-bstate").textContent = "–"; return; }
   const r = await api("/api/test-backend", {});
@@ -404,10 +503,13 @@ async function loadSystem() {
   const s = await api("/api/system");
   const mem = s.mem_total ? (1 - s.mem_avail / s.mem_total) : 0;
   const disk = s.disk_total ? (1 - s.disk_free / s.disk_total) : 0;
+  const cpu = s.cpu_pct == null ? null : s.cpu_pct / 100;
+  const cls = (f) => f >= .95 ? "bar full" : (f >= .8 ? "bar hot" : "bar");
+  const cores = (s.cpu_cores || []).map(c => `<i title="${c.toFixed(0)} %" style="--h:${c}%"></i>`).join("");
   $("o-sys").innerHTML = `
-    <dt>CPU-Last</dt><dd>${s.load ? s.load.map(x => x.toFixed(2)).join(" · ") : "–"} <span class="muted">(${s.cpus} Kerne)</span></dd>
-    <dt>RAM</dt><dd>${fmtBytes(s.mem_total - s.mem_avail)} / ${fmtBytes(s.mem_total)}<div class="bar"><i style="width:${(mem*100).toFixed(0)}%"></i></div></dd>
-    <dt>Speicher</dt><dd>${fmtBytes(s.disk_total - s.disk_free)} / ${fmtBytes(s.disk_total)}<div class="bar"><i style="width:${(disk*100).toFixed(0)}%"></i></div></dd>
+    <dt>CPU</dt><dd>${cpu == null ? "misst …" : (cpu * 100).toFixed(0) + " %"} <span class="muted">· ${s.cpus} Kerne</span><div class="${cls(cpu || 0)}"><i style="width:${((cpu || 0)*100).toFixed(0)}%"></i></div>${cores ? `<div class="cores">${cores}</div>` : ""}</dd>
+    <dt>RAM</dt><dd>${fmtBytes(s.mem_total - s.mem_avail)} / ${fmtBytes(s.mem_total)}<div class="${cls(mem)}"><i style="width:${(mem*100).toFixed(0)}%;--c:var(--mem)"></i></div></dd>
+    <dt>Speicher</dt><dd>${fmtBytes(s.disk_total - s.disk_free)} / ${fmtBytes(s.disk_total)}<div class="${cls(disk)}"><i style="width:${(disk*100).toFixed(0)}%;--c:var(--c2)"></i></div></dd>
     <dt>Docker</dt><dd>${s.docker ? esc(s.docker) : '<span style="color:var(--bad)">nicht erreichbar</span>'}</dd>`;
 }
 function stateDot(s) {

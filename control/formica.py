@@ -582,8 +582,114 @@ def test_backend(url: str, key: str) -> dict:
 # System
 # --------------------------------------------------------------------------
 
+class CpuSampler:
+    """CPU usage of the host from /proc/stat (not namespaced in a container)."""
+
+    def __init__(self):
+        self.pct = None
+        self.cores: list[float] = []
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    @staticmethod
+    def _read():
+        rows = {}
+        for line in Path("/proc/stat").read_text().splitlines():
+            if line.startswith("cpu"):
+                name, *vals = line.split()
+                v = [int(x) for x in vals[:8]]
+                rows[name] = (v[3] + v[4], sum(v))  # idle + iowait, total
+        return rows
+
+    def _loop(self):
+        try:
+            prev = self._read()
+        except OSError:
+            return
+        while True:
+            time.sleep(2)
+            try:
+                cur = self._read()
+            except OSError:
+                return
+
+            def usage(k):
+                di, dt = cur[k][0] - prev[k][0], cur[k][1] - prev[k][1]
+                return round(100 * (1 - di / dt), 1) if dt > 0 else 0.0
+            self.pct = usage("cpu")
+            self.cores = [usage(k) for k in sorted((k for k in cur if k != "cpu"), key=lambda x: int(x[3:]))]
+            prev = cur
+
+
+CPU = None
+
+
+# --------------------------------------------------------------------------
+# Updates of Formica itself
+# --------------------------------------------------------------------------
+
+UPDATE_URL = os.environ.get("FORMICA_UPDATE_URL", "https://raw.githubusercontent.com/Miki84/Formica/main")
+_update = {"checked": 0.0, "latest": None, "notes": [], "error": None}
+
+
+def vtuple(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")[:3]) or (0,)
+
+
+def parse_changelog(text: str, newer_than: str) -> list[dict]:
+    out, cur = [], None
+    for line in text.splitlines():
+        m = re.match(r"^##\s+v?(\d+\.\d+\.\d+)", line)
+        if m:
+            cur = {"version": m.group(1), "items": []}
+            if vtuple(cur["version"]) > vtuple(newer_than):
+                out.append(cur)
+            else:
+                cur = None
+        elif cur and line.strip().startswith("- "):
+            cur["items"].append(line.strip()[2:])
+    return out
+
+
+def check_update(force: bool = False) -> dict:
+    if force or time.time() - _update["checked"] > 3600:
+        try:
+            with urllib.request.urlopen(UPDATE_URL + "/VERSION", timeout=8) as r:
+                latest = r.read().decode().strip()
+            notes = []
+            try:
+                with urllib.request.urlopen(UPDATE_URL + "/CHANGELOG.md", timeout=8) as r:
+                    notes = parse_changelog(r.read().decode(), version())
+            except Exception:  # noqa: BLE001 - notes are optional
+                pass
+            _update.update(latest=latest, notes=notes, error=None)
+        except Exception as e:  # noqa: BLE001
+            _update["error"] = f"GitHub nicht erreichbar: {e}"
+        _update["checked"] = time.time()
+    latest = _update["latest"]
+    return {"current": version(), "latest": latest,
+            "available": bool(latest) and vtuple(latest) > vtuple(version()),
+            "notes": _update["notes"], "error": _update["error"],
+            "checked": _update["checked"], "git": (HOME / "app" / ".git").exists()}
+
+
+def self_update() -> tuple[bool, str]:
+    """Runs app/update.sh in a helper container: it may replace this one."""
+    if not (HOME / "app" / ".git").exists():
+        return False, "Formica wurde ohne Git installiert. Bitte einmal neu installieren (install.sh)."
+    run(["docker", "rm", "-f", "formica-updater"], timeout=20)
+    home = str(HOME)
+    script = (f"command -v git >/dev/null || apk add --no-cache git >/dev/null 2>&1; "
+              f"cp {home}/app/update.sh /tmp/update.sh && sh /tmp/update.sh")
+    code, out = run(["docker", "run", "-d", "--rm", "--name", "formica-updater",
+                     "-v", "/var/run/docker.sock:/var/run/docker.sock", "-v", f"{home}:{home}",
+                     "-e", f"FORMICA_HOME={home}", "--entrypoint", "sh", "formica-control:local", "-c", script],
+                    timeout=60)
+    return code == 0, out.strip()
+
+
 def system_info() -> dict:
-    info = {"version": version(), "cpus": os.cpu_count()}
+    info = {"version": version(), "cpus": os.cpu_count(),
+            "cpu_pct": CPU.pct if CPU else None, "cpu_cores": CPU.cores if CPU else []}
     try:
         info["load"] = [float(x) for x in Path("/proc/loadavg").read_text().split()[:3]]
     except OSError:
@@ -737,6 +843,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, JOB.state())
         if path == "/api/system":
             return self._json(200, system_info())
+        if path == "/api/update-check":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self._json(200, check_update(force=q.get("force") == ["1"]))
+        if path == "/api/update-log":
+            f = HOME / "update.log"
+            return self._json(200, {"log": f.read_text()[-20000:] if f.exists() else ""})
         if path.startswith("/api/logs/"):
             name = path.rsplit("/", 1)[-1]
             if name not in IMAGES:
@@ -829,6 +941,12 @@ class Handler(BaseHTTPRequestHandler):
             cfg = load_config()
             key = data.get("key") or cfg["backend"]["key"]
             return self._json(200, test_backend(data.get("url") or cfg["backend"]["url"], key))
+        if path == "/api/self-update":
+            if JOB.running:
+                return self._json(409, {"error": "Es läuft gerade ein anderer Vorgang."})
+            ok, out = self_update()
+            log("Selbst-Update gestartet" if ok else f"Selbst-Update fehlgeschlagen: {out}")
+            return self._json(200 if ok else 500, {"ok": ok, "error": None if ok else out})
         if path in ("/api/apply", "/api/update"):
             cfg = load_config()
             errs = validate(cfg)
@@ -848,9 +966,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve() -> None:
+    global CPU
+    CPU = CpuSampler()
     cfg = load_config()
-    if (STACK / "compose.yaml").exists() or cfg.get("admin"):
+    compose = STACK / "compose.yaml"
+    before = compose.read_text() if compose.exists() else None
+    if before is not None or cfg.get("admin"):
         render(cfg)  # a new Formica version may write the files differently
+    if before is not None and cfg.get("applied") and compose.read_text() != before:
+        log("Neue Formica-Version: Dienste werden mit den neuen Einstellungen gestartet")
+        apply_stack()
+    threading.Thread(target=check_update, daemon=True).start()
     if not cfg.get("admin"):
         log(f"Einrichtung offen. Einrichtungscode: {setup_token()}")
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
