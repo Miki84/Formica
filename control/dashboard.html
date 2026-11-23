@@ -338,8 +338,20 @@
             <div class="hint">„Erzwingen“ für PDFs, in denen Teile als Bild stecken (Angebote, Scans mit Textebene). Langsamer, liest dafür alles.</div></div></div>
         <div class="row"><label class="lbl" for="rag.docling_workers">Docling-Worker</label>
           <div><input type="number" id="rag.docling_workers" min="1" max="16"><div class="hint">Mehr Worker verarbeiten mehr Dateien gleichzeitig, brauchen aber mehr CPU und RAM.</div></div></div>
-        <div class="row"><label class="lbl" for="rag.embedding_model">Embedding-Modell</label>
-          <div><input type="text" id="rag.embedding_model"><div class="hint">Hugging-Face-Repo im GGUF-Format. Achtung: Nach einem Wechsel müssen alle Dokumente neu indexiert werden.</div></div></div>
+        <div class="row"><label class="lbl" for="rag.embedding_source">Embeddings</label>
+          <div><select id="rag.embedding_source">
+              <option value="local">Auf diesem Server (Container, CPU)</option>
+              <option value="backend">Über das Modell-Backend (MyrmidLM, GPU oder CPU im Cluster)</option>
+              <option value="custom">Eigene Adresse (OpenAI-kompatibel)</option></select>
+            <div class="hint">Wandelt Dokumente und Fragen in Vektoren um. Bei MyrmidLM vorher im Dashboard auf der Host-Karte „Embeddings: bge-m3“ einschalten.
+              Es muss bge-m3 bleiben: Mit einem anderen Modell müssen alle Dokumente neu indexiert werden.</div>
+            <div style="margin-top:8px"><button class="btn small" onclick="testEmbed()">Embeddings testen</button><span id="e-res" class="small" style="margin-left:8px"></span></div></div></div>
+        <div class="row emb-custom"><label class="lbl" for="rag.embedding_url">Adresse</label>
+          <div><input type="text" id="rag.embedding_url" placeholder="http://192.168.2.68:8080/v1"></div></div>
+        <div class="row emb-custom"><label class="lbl" for="rag.embedding_key">API-Key</label>
+          <div><input type="password" id="rag.embedding_key" autocomplete="off"></div></div>
+        <div class="row emb-local"><label class="lbl" for="rag.embedding_model">Embedding-Modell</label>
+          <div><input type="text" id="rag.embedding_model"><div class="hint">Hugging-Face-Repo im GGUF-Format für den Container auf diesem Server.</div></div></div>
         <div class="row"><label class="lbl" for="rag.chunk_size">Chunk-Größe</label>
           <div><input type="number" id="rag.chunk_size"><div class="hint">Zeichen pro Abschnitt. 1000 ≈ ein bis zwei Absätze.</div></div></div>
         <div class="row"><label class="lbl" for="rag.chunk_overlap">Overlap</label><div><input type="number" id="rag.chunk_overlap"></div></div>
@@ -475,6 +487,9 @@ async function loadConfig() {
   $("backend.key").placeholder = CFG.backend.key_set ? "gespeichert – leer lassen, um ihn zu behalten" : "";
   for (const r2 of document.querySelectorAll("input[name=access]")) r2.checked = r2.value === CFG.general.access;
   accessVisibility();
+  embedVisibility();
+  $("rag.embedding_key").value = "";
+  $("rag.embedding_key").placeholder = CFG.rag.embedding_key_set ? "gespeichert – leer lassen, um ihn zu behalten" : "";
   renderHeader(r);
 }
 function renderHeader(r) {
@@ -488,6 +503,18 @@ function renderHeader(r) {
   else p.classList.add("hidden");
 }
 document.querySelectorAll("input[name=access]").forEach(r => r.addEventListener("change", accessVisibility));
+function embedVisibility() {
+  const v = $("rag.embedding_source").value;
+  document.querySelectorAll(".emb-custom").forEach(e => e.classList.toggle("hidden", v !== "custom"));
+  document.querySelectorAll(".emb-local").forEach(e => e.classList.toggle("hidden", v !== "local"));
+}
+$("rag.embedding_source").addEventListener("change", () => { embedVisibility(); $("e-res").textContent = ""; });
+async function testEmbed() {
+  $("e-res").innerHTML = '<span class="muted">Teste …</span>';
+  const r = await api("/api/test-embeddings", formData());
+  $("e-res").innerHTML = r.ok === true ? `<span style="color:var(--good)">● bereit: ${r.dim} Dimensionen, ${r.ms} ms</span>`
+    : r.ok === false ? `<span style="color:var(--bad)">● ${esc(r.error)}</span>` : `<span class="muted">${esc(r.info)}</span>`;
+}
 function accessVisibility() {
   const a = document.querySelector("input[name=access]:checked")?.value || "http";
   document.querySelectorAll(".acc-https").forEach(e => e.classList.toggle("hidden", !(a === "internal" || a === "acme")));

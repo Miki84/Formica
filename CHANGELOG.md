@@ -1,5 +1,10 @@
 # Änderungen
 
+## 0.2.1
+- Embeddings wählbar: auf diesem Server, über das Modell-Backend (MyrmidLM ab 2.14.0, GPU oder CPU im Cluster) oder eigene Adresse
+- Knopf „Embeddings testen“ zeigt Dimensionen und Antwortzeit
+- Läuft das Embedding-Modell nicht mehr hier, startet Formica den Container dafür nicht mehr
+
 ## 0.2.0
 - Neuer Reiter „Monitor“ wie bei MyrmidLM: CPU mit Kernen und Temperatur, RAM, Datenträger- und Netzwerkdurchsatz mit Verlauf
 - Auslastung jedes Dienstes (CPU, RAM, Netz, Platte, Prozesse)

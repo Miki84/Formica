@@ -102,6 +102,9 @@ DEFAULTS = {
         "dashboard": "auto",     # MyrmidLM dashboard for the monitor: auto (port 8090), a URL, or off
     },
     "rag": {
+        "embedding_source": "local",   # local (container here) | backend (MyrmidLM /v1/embeddings) | custom
+        "embedding_url": "",           # custom: OpenAI-compatible base URL (…/v1)
+        "embedding_key": "",
         "embedding_model": "gpustack/bge-m3-GGUF:Q8_0",
         "chunk_size": 1000,
         "chunk_overlap": 150,
@@ -195,6 +198,9 @@ def public_config(cfg: dict) -> dict:
     key = out["backend"].get("key", "")
     out["backend"]["key"] = ""
     out["backend"]["key_set"] = bool(key)
+    out["rag"] = dict(cfg["rag"])
+    out["rag"]["embedding_key_set"] = bool(out["rag"].get("embedding_key"))
+    out["rag"]["embedding_key"] = ""
     return out
 
 
@@ -219,6 +225,38 @@ def dashboard_url(cfg: dict) -> str:
     return f"{u.scheme}://{u.hostname}:8090" if u.hostname else ""
 
 
+def embedding_endpoint(cfg: dict) -> tuple[str, str, str]:
+    """(base URL, key, model name) Open WebUI uses for the embeddings."""
+    r = cfg["rag"]
+    if r["embedding_source"] == "backend":
+        return cfg["backend"]["url"], cfg["backend"]["key"] or "none", "bge-m3"
+    if r["embedding_source"] == "custom":
+        return normalize_backend_url(r["embedding_url"]), r["embedding_key"] or "none", "bge-m3"
+    return "http://embeddings:8080/v1", "none", "bge-m3"
+
+
+def test_embeddings(cfg: dict) -> dict:
+    url, key, model = embedding_endpoint(cfg)
+    if cfg["rag"]["embedding_source"] == "local":
+        return {"ok": None, "info": "läuft im Container auf diesem Server (Test über die Dienste-Übersicht)"}
+    req = urllib.request.Request(url + "/embeddings", data=json.dumps({"input": ["Formica Test"], "model": model}).encode(),
+                                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read())
+        dim = len(data["data"][0]["embedding"])
+        return {"ok": True, "url": url, "dim": dim, "ms": round((time.time() - t0) * 1000)}
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read()).get("error", {}).get("message") or f"HTTP {e.code}"
+        except Exception:  # noqa: BLE001
+            msg = f"HTTP {e.code}"
+        return {"ok": False, "url": url, "error": msg}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "url": url, "error": f"Nicht erreichbar: {e}"}
+
+
 def validate(cfg: dict) -> list[str]:
     errs = []
     g = cfg["general"]
@@ -240,6 +278,10 @@ def validate(cfg: dict) -> list[str]:
         errs.append("Chunk-Größe zwischen 200 und 8000.")
     if not (0 <= int(r["chunk_overlap"]) < int(r["chunk_size"])):
         errs.append("Overlap muss kleiner als die Chunk-Größe sein.")
+    if r["embedding_source"] not in ("local", "backend", "custom"):
+        errs.append("Unbekannte Quelle für die Embeddings.")
+    if r["embedding_source"] == "custom" and not r["embedding_url"]:
+        errs.append("Bitte die Adresse des Embedding-Dienstes eintragen.")
     if r["ocr"] not in ("auto", "force", "off"):
         errs.append("Unbekannte OCR-Einstellung.")
     if not (1 <= int(r["top_k"]) <= 50):
@@ -347,9 +389,9 @@ def render_compose(cfg: dict) -> dict:
         "ENABLE_QDRANT_MULTITENANCY_MODE": "true",
         "QDRANT_ON_DISK": "true",
         "RAG_EMBEDDING_ENGINE": "openai",
-        "RAG_OPENAI_API_BASE_URL": "http://embeddings:8080/v1",
-        "RAG_OPENAI_API_KEY": "none",
-        "RAG_EMBEDDING_MODEL": "bge-m3",
+        "RAG_OPENAI_API_BASE_URL": embedding_endpoint(cfg)[0],
+        "RAG_OPENAI_API_KEY": embedding_endpoint(cfg)[1],
+        "RAG_EMBEDDING_MODEL": embedding_endpoint(cfg)[2],
         "RAG_EMBEDDING_BATCH_SIZE": "16",
         "ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER": "true",
         "CHUNK_SIZE": str(int(r["chunk_size"])),
@@ -378,9 +420,11 @@ def render_compose(cfg: dict) -> dict:
             params["ocr_lang"] = ["de", "en"]
         webui_env["DOCLING_PARAMS"] = json.dumps(params)
 
+    local_embed = r["embedding_source"] == "local"
     depends = {"postgres": {"condition": "service_healthy"},
-               "qdrant": {"condition": "service_started"},
-               "embeddings": {"condition": "service_started"}}
+               "qdrant": {"condition": "service_started"}}
+    if local_embed:
+        depends["embeddings"] = {"condition": "service_started"}
     if r["docling"]:
         depends["docling"] = {"condition": "service_started"}
 
@@ -431,6 +475,8 @@ def render_compose(cfg: dict) -> dict:
             "networks": ["formica"],
         },
     }
+    if not local_embed:
+        services.pop("embeddings")
     if r["docling"]:
         services["docling"] = {
             "image": IMAGES["docling"],
@@ -573,7 +619,8 @@ def services_status() -> list[dict]:
     cfg = load_config()
     out = []
     for name, label, desc, optional in MODULES:
-        enabled = not (name == "docling" and not cfg["rag"]["docling"])
+        enabled = not ((name == "docling" and not cfg["rag"]["docling"])
+                       or (name == "embeddings" and cfg["rag"]["embedding_source"] != "local"))
         st = state.get(name, {})
         out.append({"name": name, "label": label, "desc": desc, "optional": optional,
                     "enabled": enabled, "state": st.get("state", "fehlt" if enabled else "aus"),
@@ -1015,7 +1062,7 @@ def update_from_form(cfg: dict, data: dict) -> dict:
                 v = int(v)
             else:
                 v = str(v).strip()
-            if section == "backend" and k == "key" and v == "":
+            if (section, k) in (("backend", "key"), ("rag", "embedding_key")) and v == "":
                 continue  # empty field: keep the stored key
             cfg[section][k] = v
     cfg["backend"]["url"] = normalize_backend_url(cfg["backend"]["url"])
@@ -1184,6 +1231,13 @@ class Handler(BaseHTTPRequestHandler):
             save_config(cfg)
             return self._json(200, {"ok": not errs, "errors": errs, "config": public_config(cfg),
                                     "webui_url": webui_url(cfg)})
+        if path == "/api/test-embeddings":
+            cfg = load_config()
+            try:
+                cfg = update_from_form(cfg, data)  # test what is in the form, without saving
+            except (TypeError, ValueError):
+                pass
+            return self._json(200, test_embeddings(cfg))
         if path == "/api/test-backend":
             cfg = load_config()
             key = data.get("key") or cfg["backend"]["key"]
