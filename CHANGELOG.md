@@ -1,5 +1,11 @@
 # Änderungen
 
+## 0.2.0
+- Neuer Reiter „Monitor“ wie bei MyrmidLM: CPU mit Kernen und Temperatur, RAM, Datenträger- und Netzwerkdurchsatz mit Verlauf
+- Auslastung jedes Dienstes (CPU, RAM, Netz, Platte, Prozesse)
+- Modell-Cluster aus dem MyrmidLM-Dashboard: Tempo, GPU-Auslastung, VRAM, Temperatur, Leistung, PCIe, Kontext-Füllung, Cache und letzte Anfragen
+- Die Verwaltung läuft jetzt im Host-Netz (echte Netzwerkwerte); ältere Installationen werden einmalig automatisch umgestellt
+
 ## 0.1.3
 - Neue Karte „Chat und Tempo“: eigenes Modell für Nebenaufgaben (z. B. fast), Suchanfragen, Titel, Tags, Folgefragen und Autovervollständigung einzeln schaltbar
 - Standard schneller: keine eigenen Suchanfragen, keine Tags, keine Autovervollständigung

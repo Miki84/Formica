@@ -114,11 +114,12 @@ services:
     image: formica-control:local
     container_name: formica-control
     restart: unless-stopped
-    ports:
-      - "$PORT:8095"
+    # Host-Netz: der Monitor sieht die echten Netzwerkkarten des Servers
+    network_mode: host
     environment:
       TZ: Europe/Berlin
       FORMICA_HOME: $DIR
+      FORMICA_PORT: "$PORT"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - $DIR:$DIR

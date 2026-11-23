@@ -99,6 +99,7 @@ DEFAULTS = {
     "backend": {
         "url": "",               # e.g. http://192.168.2.243:8080/v1 (MyrmidLM master)
         "key": "",
+        "dashboard": "auto",     # MyrmidLM dashboard for the monitor: auto (port 8090), a URL, or off
     },
     "rag": {
         "embedding_model": "gpustack/bge-m3-GGUF:Q8_0",
@@ -206,6 +207,16 @@ def normalize_backend_url(url: str) -> str:
     if not url.endswith("/v1"):
         url += "/v1"
     return url
+
+
+def dashboard_url(cfg: dict) -> str:
+    d = (cfg["backend"].get("dashboard") or "auto").strip()
+    if d == "off":
+        return ""
+    if d != "auto":
+        return d.rstrip("/") if re.match(r"^https?://", d) else "http://" + d.rstrip("/")
+    u = urllib.parse.urlparse(cfg["backend"]["url"] or "")
+    return f"{u.scheme}://{u.hostname}:8090" if u.hostname else ""
 
 
 def validate(cfg: dict) -> list[str]:
@@ -601,45 +612,237 @@ def test_backend(url: str, key: str) -> dict:
 # System
 # --------------------------------------------------------------------------
 
-class CpuSampler:
-    """CPU usage of the host from /proc/stat (not namespaced in a container)."""
+def _read(p) -> str:
+    try:
+        return Path(p).read_text().strip()
+    except OSError:
+        return ""
+
+
+def cpu_temp() -> float | None:
+    """CPU package temperature like MyrmidLM: hwmon, else thermal zones. None in VMs."""
+    best = None
+    for hw in Path("/sys/class/hwmon").glob("hwmon*"):
+        if _read(hw / "name") not in ("k10temp", "coretemp", "zenpower", "cpu_thermal", "acpitz"):
+            continue
+        temps = {}
+        for f in hw.glob("temp*_input"):
+            label = _read(hw / f.name.replace("_input", "_label")) or f.name
+            try:
+                temps[label] = int(_read(f)) / 1000
+            except ValueError:
+                pass
+        pick = next((v for k, v in temps.items() if k in ("Tdie", "Tctl")), None) \
+            or max((v for k, v in temps.items() if k.startswith("Package")), default=None) \
+            or next((v for _, v in sorted(temps.items())), None)
+        if pick is not None and (best is None or pick > best):
+            best = pick
+    if best is None:
+        for z in Path("/sys/class/thermal").glob("thermal_zone*"):
+            if _read(z / "type") in ("x86_pkg_temp", "cpu-thermal", "cpu_thermal", "soc-thermal"):
+                try:
+                    v = int(_read(z / "temp")) / 1000
+                except ValueError:
+                    continue
+                best = v if best is None else max(best, v)
+    return round(best, 1) if best is not None else None
+
+
+def cpu_name() -> str:
+    for line in _read("/proc/cpuinfo").splitlines():
+        if line.startswith("model name"):
+            return re.sub(r"\s+", " ", line.split(":", 1)[1]).strip()
+    return ""
+
+
+DISK_RE = re.compile(r"^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|hd[a-z]+|nvme\d+n\d+|mmcblk\d+)$")
+NET_SKIP = re.compile(r"^(lo|docker\d*|br-.*|veth.*|virbr.*|cni.*|flannel.*|tap.*|fw.*)$")
+
+
+def _disk_bytes() -> tuple[int, int]:
+    r = w = 0
+    for line in _read("/proc/diskstats").splitlines():
+        f = line.split()
+        if len(f) > 9 and DISK_RE.match(f[2]):
+            r += int(f[5]) * 512
+            w += int(f[9]) * 512
+    return r, w
+
+
+def _net_bytes() -> tuple[int, int]:
+    rx = tx = 0
+    for line in _read("/proc/net/dev").splitlines()[2:]:
+        name, data = line.split(":", 1)
+        if NET_SKIP.match(name.strip()):
+            continue
+        f = data.split()
+        rx += int(f[0])
+        tx += int(f[8])
+    return rx, tx
+
+
+def _size(txt: str) -> float:
+    """'1.5GiB' / '12.3kB' -> bytes (docker stats)."""
+    m = re.match(r"([\d.]+)\s*([kKMGTP]?i?B)?", txt.strip())
+    if not m:
+        return 0.0
+    n = float(m.group(1))
+    unit = (m.group(2) or "B")
+    mult = {"B": 1, "kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
+            "KiB": 1024, "kiB": 1024, "MiB": 1024**2, "GiB": 1024**3, "TiB": 1024**4}
+    return n * mult.get(unit, 1)
+
+
+class Monitor:
+    """Live figures of this server, its containers and the model cluster,
+    with five minutes of history (2 s steps). The expensive parts (docker
+    stats, the cluster) only run while someone looks at the monitor."""
+
+    HIST = 150
 
     def __init__(self):
-        self.pct = None
+        self.lock = threading.Lock()
+        self.pct = None            # CPU usage, also used by the overview
         self.cores: list[float] = []
+        self.host: dict = {"cpu_name": cpu_name()}
+        self.hist = {k: [] for k in ("cpu", "ram", "disk_r", "disk_w", "net_rx", "net_tx", "temp")}
+        self.containers: list[dict] = []
+        self.cluster: dict = {}
+        self.viewed = 0.0
         threading.Thread(target=self._loop, daemon=True).start()
+        threading.Thread(target=self._slow_loop, daemon=True).start()
 
     @staticmethod
-    def _read():
+    def _cpu_rows():
         rows = {}
-        for line in Path("/proc/stat").read_text().splitlines():
+        for line in _read("/proc/stat").splitlines():
             if line.startswith("cpu"):
                 name, *vals = line.split()
                 v = [int(x) for x in vals[:8]]
-                rows[name] = (v[3] + v[4], sum(v))  # idle + iowait, total
+                rows[name] = (v[3] + v[4], sum(v))
         return rows
 
+    def _push(self, k, v):
+        h = self.hist[k]
+        h.append(v)
+        if len(h) > self.HIST:
+            del h[0]
+
     def _loop(self):
-        try:
-            prev = self._read()
-        except OSError:
-            return
+        prev, t0 = self._cpu_rows(), time.time()
+        d0, n0 = _disk_bytes(), _net_bytes()
         while True:
             time.sleep(2)
-            try:
-                cur = self._read()
-            except OSError:
-                return
+            cur, t1 = self._cpu_rows(), time.time()
+            d1, n1 = _disk_bytes(), _net_bytes()
+            span = max(0.5, t1 - t0)
 
             def usage(k):
+                if k not in prev:
+                    return 0.0
                 di, dt = cur[k][0] - prev[k][0], cur[k][1] - prev[k][1]
                 return round(100 * (1 - di / dt), 1) if dt > 0 else 0.0
-            self.pct = usage("cpu")
-            self.cores = [usage(k) for k in sorted((k for k in cur if k != "cpu"), key=lambda x: int(x[3:]))]
-            prev = cur
+            mem = {}
+            for line in _read("/proc/meminfo").splitlines():
+                k, v = line.split(":", 1)
+                mem[k] = int(v.split()[0]) * 1024
+            with self.lock:
+                self.pct = usage("cpu")
+                self.cores = [usage(k) for k in sorted((k for k in cur if k != "cpu"), key=lambda x: int(x[3:]))]
+                total, avail = mem.get("MemTotal", 0), mem.get("MemAvailable", 0)
+                self.host.update({
+                    "cpu_pct": self.pct, "cores": self.cores, "cpu_temp_c": cpu_temp(),
+                    "load": [float(x) for x in _read("/proc/loadavg").split()[:3]] or None,
+                    "ram_total": total, "ram_used": total - avail,
+                    "swap_total": mem.get("SwapTotal", 0), "swap_used": mem.get("SwapTotal", 0) - mem.get("SwapFree", 0),
+                    "disk_r": max(0, d1[0] - d0[0]) / span, "disk_w": max(0, d1[1] - d0[1]) / span,
+                    "net_rx": max(0, n1[0] - n0[0]) / span, "net_tx": max(0, n1[1] - n0[1]) / span,
+                    "uptime": float((_read("/proc/uptime").split() or ["0"])[0]),
+                })
+                du = shutil.disk_usage(HOME if HOME.exists() else "/")
+                self.host["disk_total"], self.host["disk_used"] = du.total, du.total - du.free
+                self._push("cpu", self.pct)
+                self._push("ram", round(100 * (total - avail) / total, 1) if total else None)
+                self._push("disk_r", self.host["disk_r"])
+                self._push("disk_w", self.host["disk_w"])
+                self._push("net_rx", self.host["net_rx"])
+                self._push("net_tx", self.host["net_tx"])
+                self._push("temp", self.host["cpu_temp_c"])
+            prev, t0, d0, n0 = cur, t1, d1, n1
+
+    def _slow_loop(self):
+        while True:
+            if time.time() - self.viewed < 30:
+                try:
+                    self._docker_stats()
+                except Exception as e:  # noqa: BLE001
+                    log(f"Monitor: docker stats: {e}")
+                try:
+                    self._cluster()
+                except Exception as e:  # noqa: BLE001
+                    self.cluster = {"error": str(e)[:200]}
+            time.sleep(3)
+
+    def _docker_stats(self):
+        code, out = run(["docker", "stats", "--no-stream", "--format", "{{json .}}"], timeout=30)
+        if code != 0:
+            return
+        names = {"formica-control": "formica"}
+        rows = []
+        for line in out.splitlines():
+            if not line.startswith("{"):
+                continue
+            d = json.loads(line)
+            name = d.get("Name", "")
+            m = re.match(rf"^{PROJECT}-(.+)-\d+$", name)
+            svc = m.group(1) if m else names.get(name)
+            if not svc:
+                continue
+            used, _, limit = d.get("MemUsage", "").partition("/")
+            net_in, _, net_out = d.get("NetIO", "").partition("/")
+            blk_r, _, blk_w = d.get("BlockIO", "").partition("/")
+            rows.append({"service": svc, "cpu": float(d.get("CPUPerc", "0%").rstrip("%") or 0),
+                         "mem": _size(used), "mem_limit": _size(limit), "mem_pct": float(d.get("MemPerc", "0%").rstrip("%") or 0),
+                         "net_in": _size(net_in), "net_out": _size(net_out),
+                         "blk_r": _size(blk_r), "blk_w": _size(blk_w), "pids": int(d.get("PIDs") or 0)})
+        order = [m[0] for m in MODULES] + ["formica"]
+        rows.sort(key=lambda r: order.index(r["service"]) if r["service"] in order else 99)
+        self.containers = rows
+
+    def _cluster(self):
+        cfg = load_config()
+        url = dashboard_url(cfg)
+        if not url:
+            self.cluster = {}
+            return
+        key = cfg["backend"]["key"]
+        hdr = {"Authorization": f"Bearer {key}"} if key else {}
+
+        def get(path):
+            with urllib.request.urlopen(urllib.request.Request(url + path, headers=hdr), timeout=4) as r:
+                return json.loads(r.read())
+        st = get("/api/status")
+        mon = get("/api/monitor")
+        hosts, seen = [], set()
+        all_hosts = ((st.get("hosts") or {}).get("hosts") or [])
+        for h in all_hosts:
+            s = h.get("stats") or {}
+            if not s.get("host") or s["host"] in seen:
+                continue
+            seen.add(s["host"])
+            hosts.append({"name": s["host"], "stats": s,
+                          "wheres": [x.get("name") for x in all_hosts if (x.get("stats") or {}).get("host") == s["host"]]})
+        self.cluster = {"url": url, "hosts": hosts, "requests": (mon.get("requests") or [])[:200],
+                        "totals": mon.get("totals") or {}, "time": time.time()}
+
+    def snapshot(self) -> dict:
+        self.viewed = time.time()
+        with self.lock:
+            return {"host": dict(self.host), "hist": {k: list(v) for k, v in self.hist.items()},
+                    "containers": self.containers, "cluster": self.cluster}
 
 
-CPU = None
+MON = None
 
 
 # --------------------------------------------------------------------------
@@ -706,9 +909,32 @@ def self_update() -> tuple[bool, str]:
     return code == 0, out.strip()
 
 
+def migrate_control() -> None:
+    """Older installations run the control panel with port mapping. Since
+    0.2.0 it runs in the host network (real NIC figures for the monitor):
+    rewrite control.yaml once through update.sh."""
+    ctl, mark = HOME / "control.yaml", HOME / ".hostnet-migrated"
+    if not ctl.exists() or "network_mode: host" in ctl.read_text() or mark.exists():
+        return
+    if not (HOME / "app" / ".git").exists():
+        return
+    mark.write_text(time.strftime("%Y-%m-%d %H:%M"))
+
+    def later():
+        time.sleep(8)
+        for _ in range(60):  # an update that is still checking on us: let it finish
+            code, out = run(["docker", "inspect", "-f", "{{.State.Running}}", "formica-updater"], timeout=10)
+            if code != 0 or out.strip() != "true":
+                break
+            time.sleep(3)
+        ok, out = self_update()
+        log("Umstellung auf Host-Netz gestartet" if ok else f"Umstellung auf Host-Netz fehlgeschlagen: {out}")
+    threading.Thread(target=later, daemon=True).start()
+
+
 def system_info() -> dict:
     info = {"version": version(), "cpus": os.cpu_count(),
-            "cpu_pct": CPU.pct if CPU else None, "cpu_cores": CPU.cores if CPU else []}
+            "cpu_pct": MON.pct if MON else None, "cpu_cores": MON.cores if MON else []}
     try:
         info["load"] = [float(x) for x in Path("/proc/loadavg").read_text().split()[:3]]
     except OSError:
@@ -860,6 +1086,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"services": services_status(), "job": JOB.state()})
         if path == "/api/job":
             return self._json(200, JOB.state())
+        if path == "/api/monitor":
+            return self._json(200, MON.snapshot() if MON else {})
         if path == "/api/system":
             return self._json(200, system_info())
         if path == "/api/update-check":
@@ -985,8 +1213,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve() -> None:
-    global CPU
-    CPU = CpuSampler()
+    global MON
+    MON = Monitor()
     cfg = load_config()
     compose = STACK / "compose.yaml"
     before = compose.read_text() if compose.exists() else None
@@ -996,6 +1224,7 @@ def serve() -> None:
         log("Neue Formica-Version: Dienste werden mit den neuen Einstellungen gestartet")
         apply_stack()
     threading.Thread(target=check_update, daemon=True).start()
+    migrate_control()
     if not cfg.get("admin"):
         log(f"Einrichtung offen. Einrichtungscode: {setup_token()}")
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)

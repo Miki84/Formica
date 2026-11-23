@@ -106,6 +106,32 @@
   .auth .stack input { max-width: none; }
   .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-2);
          border: 1px solid var(--line); font-size: .8rem; margin: 2px 4px 2px 0; }
+  .mon-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 6px 0 12px; }
+  .mon-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mon-pick button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+  .mon-pick button[aria-pressed="true"] { color: var(--text); border-color: var(--c0); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 14px 16px 8px; min-width: 0; }
+  .tile h4 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .tile .big { font-size: 26px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .tile .big small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  .tile .pair { display: flex; justify-content: space-between; gap: 8px; }
+  .tile .sub { font-size: 12px; color: var(--muted); margin-top: 4px; min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile svg.sp { width: 100%; height: 34px; display: block; margin-top: 6px; }
+  .mon-row { display: grid; grid-template-columns: 300px 1fr; gap: 14px; margin-top: 14px; }
+  .gauge { display: grid; place-items: center; margin: 6px 0 12px; }
+  .mon-bar { margin: 10px 0; font-size: 13px; }
+  table.req { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.req th { text-align: left; font-weight: 500; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table.req td { padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.req td.mname { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  table.req td.num, table.req th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .st { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; background: var(--surface-2); }
+  .st.bad { color: var(--bad); }
+  .mbar { display: inline-block; width: 70px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--line) 80%, transparent); overflow: hidden; vertical-align: middle; margin-left: 8px; }
+  .mbar > i { display: block; height: 100%; background: var(--c, var(--c0)); }
+  .section-t { margin: 26px 0 10px; display: flex; align-items: baseline; gap: 10px; }
+  @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, 1fr); } .mon-row { grid-template-columns: 1fr; } }
   .hidden { display: none !important; }
   .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--line) 80%, transparent); overflow: hidden; margin-top: 5px; }
@@ -169,6 +195,7 @@
 
   <nav class="tabs" id="tabs">
     <button data-t="overview" class="on">Übersicht</button>
+    <button data-t="monitor">Monitor</button>
     <button data-t="settings">Einstellungen</button>
     <button data-t="logs">Logs</button>
     <button data-t="files">Dateien</button>
@@ -208,6 +235,52 @@
       <div class="flex" style="justify-content:space-between"><h2 id="job-title">Vorgang</h2><span id="job-state" class="pill"></span></div>
       <pre id="job-out" style="margin-top:10px"></pre>
     </div>
+  </section>
+
+  <!-- Monitor -->
+  <section id="t-monitor" class="hidden">
+    <div class="section-t"><h2>Dieser Server</h2><span class="muted small" id="m-host-sub"></span></div>
+    <div class="tiles">
+      <div class="tile"><h4>CPU</h4><div class="big" id="h-cpu">–</div><div class="sub" id="h-cpu-s"></div><svg class="sp" id="hs-cpu" viewBox="0 0 300 34" preserveAspectRatio="none"></svg><div class="cores" id="h-cores"></div></div>
+      <div class="tile"><h4>RAM</h4><div class="big" id="h-ram">–</div><div class="sub" id="h-ram-s"></div><svg class="sp" id="hs-ram" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+      <div class="tile"><h4>Datenträger lesen / schreiben</h4><div class="pair"><div class="big" id="h-dr">–</div><div class="big" id="h-dw">–</div></div><div class="sub" id="h-disk-s"></div><svg class="sp" id="hs-disk" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+      <div class="tile"><h4>Netzwerk empfangen / senden</h4><div class="pair"><div class="big" id="h-rx">–</div><div class="big" id="h-tx">–</div></div><div class="sub" id="h-net-s"></div><svg class="sp" id="hs-net" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+    </div>
+
+    <div class="section-t"><h2>Dienste</h2><span class="muted small">Auslastung je Container, alle paar Sekunden</span></div>
+    <div class="card" style="overflow-x:auto"><table class="req"><thead><tr><th>Dienst</th><th class="num">CPU</th><th class="num">RAM</th><th class="num">Netz ein / aus</th><th class="num">Platte lesen / schreiben</th><th class="num">Prozesse</th></tr></thead><tbody id="m-ctr"></tbody></table>
+      <p class="hint" style="margin-top:8px">CPU in Prozent eines Kerns (200 % = zwei Kerne voll). Netz und Platte: Summe seit dem Start des Containers.</p></div>
+
+    <div id="m-cluster" class="hidden">
+      <div class="section-t"><h2>Modell-Cluster (MyrmidLM)</h2><a class="muted small" id="m-cl-link" target="_blank" rel="noopener"></a></div>
+      <div class="mon-h"><div class="mon-pick" id="mon-pick"></div><span class="muted small" id="m-cl-time"></span></div>
+      <div class="tiles">
+        <div class="tile"><h4>Tempo (letzte Anfrage)</h4><div class="pair"><div class="big" id="mt-tg">–</div><div class="big" id="mt-pp">–</div></div><div class="pair sub"><span>schreiben</span><span>lesen</span></div><svg class="sp" id="ms-tg" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+        <div class="tile"><h4>GPU-Auslastung</h4><div class="big" id="mt-gpu">–</div><div class="sub" id="mt-gpu-s"></div><svg class="sp" id="ms-gpu" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+        <div class="tile"><h4>VRAM</h4><div class="big" id="mt-vram">–</div><div class="sub" id="mt-vram-s"></div><svg class="sp" id="ms-vram" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+        <div class="tile"><h4>GPU-Temperatur</h4><div class="big" id="mt-temp">–</div><div class="sub" id="mt-temp-s"></div><svg class="sp" id="ms-temp" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+        <div class="tile"><h4>Leistungsaufnahme GPUs</h4><div class="big" id="mt-pow">–</div><div class="sub" id="mt-pow-s"></div><svg class="sp" id="ms-pow" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+        <div class="tile"><h4>PCIe</h4><div class="big" id="mt-pcie">–</div><div class="sub" id="mt-pcie-s"></div></div>
+        <div class="tile"><h4>CPU</h4><div class="big" id="mt-cpu">–</div><div class="sub" id="mt-cpu-s"></div><svg class="sp" id="ms-cpu" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+        <div class="tile"><h4>RAM</h4><div class="big" id="mt-ram">–</div><div class="sub" id="mt-ram-s"></div><svg class="sp" id="ms-ram" viewBox="0 0 300 34" preserveAspectRatio="none"></svg></div>
+      </div>
+      <div class="mon-row">
+        <div class="card">
+          <h3>Kontext-Füllung</h3>
+          <div class="gauge" id="m-gauge"></div>
+          <div class="mon-bar"><div class="pair" style="display:flex;justify-content:space-between"><span>Aus dem Cache wiederverwendet</span><span id="m-reuse-t">–</span></div><div class="bar"><i id="m-reuse"></i></div></div>
+          <div class="mon-bar"><div class="pair" style="display:flex;justify-content:space-between"><span>Wiederverwendet seit Start</span><span id="m-reuse-all-t">–</span></div><div class="bar"><i id="m-reuse-all"></i></div></div>
+          <p class="hint" style="margin-top:12px">Hoher Anteil aus dem Cache = schnelle Antworten. Nebenaufgaben über dasselbe Modell drücken ihn (Einstellungen → Chat und Tempo).</p>
+        </div>
+        <div class="card" style="min-width:0">
+          <div class="flex" style="justify-content:space-between"><h3>Letzte Anfragen</h3>
+            <div class="flex"><label class="switch small"><input type="checkbox" id="m-only"> nur Formica</label><button class="btn small" id="m-all">Alle anzeigen</button></div></div>
+          <div style="overflow-x:auto;margin-top:8px"><table class="req"><thead><tr><th>Zeit</th><th>Von</th><th>Modell</th><th class="num" title="Vorausraten (MTP oder Entwurfsmodell): Anteil übernommener Token">Treffer</th><th>Status</th><th class="num">Prompt</th><th class="num">Wiederverw.</th><th class="num">Ausgabe</th><th class="num">Lesen t/s</th><th class="num">Schreiben t/s</th><th class="num">Dauer</th></tr></thead><tbody id="m-req"></tbody></table></div>
+          <p class="hint" id="m-sum" style="margin-top:10px"></p>
+        </div>
+      </div>
+    </div>
+    <div id="m-cluster-off" class="card hidden" style="margin-top:20px"></div>
   </section>
 
   <!-- Einstellungen -->
@@ -250,6 +323,8 @@
         <div class="row"><label class="lbl" for="backend.key">API-Key</label>
           <div><input type="password" id="backend.key" autocomplete="off">
             <div class="hint" id="key-hint">Beim MyrmidLM-Master anzeigen mit <code>sudo myrmid key</code>.</div></div></div>
+        <div class="row"><label class="lbl" for="backend.dashboard">MyrmidLM-Dashboard</label>
+          <div><input type="text" id="backend.dashboard" placeholder="auto"><div class="hint"><code>auto</code>: gleicher Rechner, Port 8090. Liefert GPU-Werte und Anfragen für den Monitor. <code>off</code> schaltet das ab.</div></div></div>
         <div class="row"><span class="lbl"></span>
           <div><button class="btn small" onclick="testBackend()">Verbindung testen</button><div id="t-res" style="margin-top:8px"></div></div></div>
       </div>
@@ -380,7 +455,8 @@ $("tabs").addEventListener("click", (e) => { const t = e.target.dataset.t; if (t
 function switchTab(t) {
   TAB = t;
   for (const b of $("tabs").children) b.classList.toggle("on", b.dataset.t === t);
-  for (const id of ["overview", "settings", "logs", "files"]) $("t-" + id).classList.toggle("hidden", id !== t);
+  for (const id of ["overview", "monitor", "settings", "logs", "files"]) $("t-" + id).classList.toggle("hidden", id !== t);
+  if (t === "monitor") monTick();
   if (t === "files") loadFiles();
   if (t === "logs" && $("log-svc").value) loadLogs();
 }
@@ -540,6 +616,7 @@ const STATE_DE = { running: "läuft", exited: "beendet", restarting: "startet ne
 async function loadServices() {
   const r = await api("/api/services");
   const svc = r.services;
+  window.SVC_LABELS = svc;
   $("o-svc").innerHTML = svc.map(s => `<tr>
     <td style="width:22px">${stateDot(s)}</td>
     <td><b>${esc(s.label)}</b><div class="muted small">${esc(s.desc)}</div></td>
@@ -606,6 +683,117 @@ async function loadFiles() {
   const r = await api("/api/files");
   $("f-compose").textContent = r.compose || "Noch nicht erzeugt. Erst Einstellungen speichern und übernehmen.";
   $("f-caddy").textContent = r.caddyfile || "–";
+}
+
+// ---------- Monitor (wie MyrmidLM) ----------
+const nf = (x, d = 0) => x == null || isNaN(x) ? "–" : Number(x).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
+function rate(b) { if (b == null) return "–"; if (b < 1024) return `${nf(b)}<small>B/s</small>`; if (b < 1048576) return `${nf(b / 1024, 0)}<small>KB/s</small>`; return `${nf(b / 1048576, 1)}<small>MB/s</small>`; }
+function uptime(s) { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d} T ${h} Std` : (h ? `${h} Std ${m} Min` : `${m} Min`); }
+function spark(id, vals, max, color, vals2, color2) {
+  const svg = $(id); if (!svg) return;
+  const draw = (vs, c, fill) => {
+    const v = vs.filter((x) => x != null); if (v.length < 2) return "";
+    const n = vs.length, pts = vs.map((x, i) => x == null ? null : `${(i * 300 / Math.max(n - 1, 1)).toFixed(1)},${(32 - (x / m) * 30).toFixed(1)}`).filter(Boolean);
+    return (fill ? `<polygon points="${pts[0].split(",")[0]},34 ${pts.join(" ")} ${pts[pts.length - 1].split(",")[0]},34" fill="${c}" opacity="0.15"/>` : "") +
+      `<polyline points="${pts.join(" ")}" fill="none" stroke="${c}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+  };
+  const all = [...vals, ...(vals2 || [])].filter((x) => x != null);
+  const m = max || Math.max(1, ...all) * 1.15;
+  svg.innerHTML = draw(vals, color, true) + (vals2 ? draw(vals2, color2, false) : "");
+}
+const mon = { pick: "all", all: false, hist: {}, timer: null, data: null };
+$("m-all").addEventListener("click", () => { mon.all = !mon.all; $("m-all").textContent = mon.all ? "Weniger" : "Alle anzeigen"; monCluster(); });
+$("m-only").addEventListener("change", monCluster);
+$("mon-pick").addEventListener("click", (ev) => { const id = ev.target.dataset && ev.target.dataset.pick; if (id) { mon.pick = id; monCluster(); } });
+async function monTick() {
+  clearTimeout(mon.timer);
+  if (TAB !== "monitor" || $("v-app").classList.contains("hidden")) return;
+  try { mon.data = await api("/api/monitor"); monHost(); monCluster(); } catch (e) { /* nächste Runde */ }
+  mon.timer = setTimeout(monTick, 2000);
+}
+function monHost() {
+  const d = mon.data, h = d.host || {}, H = d.hist || {};
+  $("m-host-sub").textContent = [h.cpu_name, h.uptime ? "läuft seit " + uptime(h.uptime) : ""].filter(Boolean).join(" · ");
+  $("h-cpu").innerHTML = h.cpu_pct != null ? `${nf(h.cpu_pct)}<small>%</small>` : "–";
+  $("h-cpu-s").textContent = [`${(h.cores || []).length} Kerne`, h.cpu_temp_c != null ? h.cpu_temp_c + " °C" : "", h.load ? "Load " + h.load.map((x) => nf(x, 2)).join(" / ") : ""].filter(Boolean).join(" · ");
+  $("h-cores").innerHTML = (h.cores || []).map((c) => `<i title="${nf(c)} %" style="--h:${c}%"></i>`).join("");
+  $("h-ram").innerHTML = h.ram_total ? `${nf(h.ram_used / 1073741824, 1)}<small>/ ${nf(h.ram_total / 1073741824, 0)} GB</small>` : "–";
+  $("h-ram-s").textContent = h.ram_total ? `${nf(100 * h.ram_used / h.ram_total)} % belegt` + (h.swap_total ? ` · Swap ${nf(h.swap_used / 1073741824, 1)} / ${nf(h.swap_total / 1073741824, 0)} GB` : "") : "";
+  $("h-dr").innerHTML = rate(h.disk_r); $("h-dw").innerHTML = rate(h.disk_w);
+  $("h-disk-s").textContent = h.disk_total ? `Belegt ${nf(h.disk_used / 1073741824, 0)} von ${nf(h.disk_total / 1073741824, 0)} GB (${nf(100 * h.disk_used / h.disk_total)} %)` : "";
+  $("h-rx").innerHTML = rate(h.net_rx); $("h-tx").innerHTML = rate(h.net_tx);
+  $("h-net-s").textContent = "alle Netzwerkkarten des Servers";
+  spark("hs-cpu", H.cpu || [], 100, "var(--c2)"); spark("hs-ram", H.ram || [], 100, "var(--c5)");
+  spark("hs-disk", H.disk_r || [], null, "var(--c4)", H.disk_w || [], "var(--c1)");
+  spark("hs-net", H.net_rx || [], null, "var(--c0)", H.net_tx || [], "var(--c3)");
+  const lbl = {}; for (const m of (window.SVC_LABELS || [])) lbl[m.name] = m.label;
+  const b = (x) => x < 1048576 ? nf(x / 1024, 0) + " KB" : (x < 1073741824 ? nf(x / 1048576, 0) + " MB" : nf(x / 1073741824, 1) + " GB");
+  $("m-ctr").innerHTML = (d.containers || []).map((c) => `<tr><td><b>${esc(lbl[c.service] || (c.service === "formica" ? "Formica (Verwaltung)" : c.service))}</b></td>
+    <td class="num">${nf(c.cpu, 1)} %<span class="mbar"><i style="width:${Math.min(100, c.cpu / Math.max(1, (h.cores || []).length))}%;--c:var(--c2)"></i></span></td>
+    <td class="num">${b(c.mem)}<span class="mbar"><i style="width:${Math.min(100, c.mem_pct)}%;--c:var(--mem)"></i></span></td>
+    <td class="num">${b(c.net_in)} / ${b(c.net_out)}</td><td class="num">${b(c.blk_r)} / ${b(c.blk_w)}</td><td class="num">${c.pids}</td></tr>`).join("")
+    || '<tr><td colspan="6" class="muted">Keine Daten (Docker nicht erreichbar oder Dienste nicht gestartet).</td></tr>';
+}
+function monCluster() {
+  const cl = (mon.data || {}).cluster || {};
+  const on = !!(cl.hosts || cl.requests);
+  $("m-cluster").classList.toggle("hidden", !on);
+  $("m-cluster-off").classList.toggle("hidden", on);
+  if (!on) {
+    $("m-cluster-off").innerHTML = cl.error
+      ? `<h3>Modell-Cluster</h3><p class="muted small" style="margin-top:6px">MyrmidLM-Dashboard nicht erreichbar: ${esc(cl.error)}. Adresse und Key unter Einstellungen → Modell-Backend prüfen.</p>`
+      : `<h3>Modell-Cluster</h3><p class="muted small" style="margin-top:6px">Kein MyrmidLM-Dashboard eingestellt.</p>`;
+    return;
+  }
+  $("m-cl-link").href = cl.url; $("m-cl-link").textContent = cl.url + " ↗";
+  $("m-cl-time").textContent = cl.time ? "Stand " + new Date(cl.time * 1000).toLocaleTimeString("de-DE") : "";
+  const pcs = cl.hosts || [];
+  if (mon.pick !== "all" && !pcs.some((p) => p.name === mon.pick)) mon.pick = "all";
+  $("mon-pick").innerHTML = [{ name: "all", label: "Alle Hosts" }, ...pcs.map((p) => ({ name: p.name, label: p.name }))].map((p) => `<button type="button" data-pick="${esc(p.name)}" aria-pressed="${p.name === mon.pick}">${esc(p.label)}</button>`).join("");
+  const sel = mon.pick === "all" ? pcs : pcs.filter((p) => p.name === mon.pick);
+  const gpus = sel.flatMap((p) => ((p.stats || {}).gpus || []).map((g, i) => ({ ...g, pc: p.name, i })));
+  const sum = (a) => a.reduce((x, y) => x + (y || 0), 0);
+  const avg = (a) => { const v = a.filter((x) => x != null); return v.length ? sum(v) / v.length : null; };
+  const gname = (g) => (sel.length > 1 ? g.pc + " " : "") + "GPU " + g.i;
+  const util = avg(gpus.map((g) => g.util_pct)), memU = sum(gpus.map((g) => g.mem_used_mb)), memT = sum(gpus.map((g) => g.mem_total_mb));
+  const temps = gpus.map((g) => g.temp_c).filter((x) => x != null), pow = sum(gpus.map((g) => g.power_w));
+  const cpu = avg(sel.map((p) => p.stats.cpu_pct)), ramU = sum(sel.map((p) => p.stats.ram_used_mb)), ramT = sum(sel.map((p) => p.stats.ram_total_mb));
+  let reqs = (cl.requests || []).filter((r) => mon.pick === "all" || sel.some((p) => (p.wheres || []).includes(r.where) || p.name === r.where || String(r.where || "").startsWith(p.name)));
+  if ($("m-only").checked) reqs = reqs.filter((r) => /formica|open.?webui/i.test(r.client || ""));
+  const lr = reqs.find((r) => r.status === 200 && (r.tg || r.pp));
+  const H = mon.hist[mon.pick] = mon.hist[mon.pick] || { tg: [], gpu: [], vram: [], temp: [], pow: [], cpu: [], ram: [] };
+  const push = (k, v) => { H[k].push(v); if (H[k].length > 150) H[k].shift(); };
+  push("tg", lr ? lr.tg : null); push("gpu", util); push("vram", memT ? 100 * memU / memT : null);
+  push("temp", temps.length ? Math.max(...temps) : null); push("pow", gpus.length ? pow : null);
+  push("cpu", cpu); push("ram", ramT ? 100 * ramU / ramT : null);
+  $("mt-tg").innerHTML = lr && lr.tg ? `${nf(lr.tg, 1)}<small>t/s</small>` : "–";
+  $("mt-pp").innerHTML = lr && lr.pp ? `${nf(lr.pp)}<small>t/s</small>` : "–";
+  $("mt-gpu").innerHTML = util != null ? `${nf(util)}<small>%</small>` : "–";
+  $("mt-gpu-s").textContent = gpus.map((g) => `${gname(g)} ${g.util_pct ?? "–"} %`).join(" · ");
+  $("mt-vram").innerHTML = memT ? `${nf(memU / 1024, 1)}<small>/ ${nf(memT / 1024)} GB</small>` : "–";
+  $("mt-vram-s").textContent = gpus.map((g) => `${gname(g)} ${nf((g.mem_used_mb || 0) / 1024, 1)} GB`).join(" · ");
+  $("mt-temp").innerHTML = temps.length ? `${Math.max(...temps)}<small>°C</small>` : "–";
+  $("mt-temp-s").textContent = gpus.filter((g) => g.temp_c != null).map((g) => `${gname(g)} ${g.temp_c} °C`).join(" · ");
+  $("mt-pow").innerHTML = gpus.some((g) => g.power_w != null) ? `${nf(pow)}<small>W</small>` : "–";
+  $("mt-pow-s").textContent = gpus.filter((g) => g.power_w != null).map((g) => `${gname(g)} ${nf(g.power_w)} W`).join(" · ");
+  const pc = gpus.filter((g) => g.pcie_gen);
+  $("mt-pcie").innerHTML = pc.length ? `Gen${Math.min(...pc.map((g) => g.pcie_gen))}<small>x${Math.min(...pc.map((g) => g.pcie_width || 0))}</small>` : "–";
+  $("mt-pcie-s").textContent = pc.map((g) => `${gname(g)} Gen${g.pcie_gen} x${g.pcie_width}${g.pcie_width_max && g.pcie_width_max !== g.pcie_width ? ` (max x${g.pcie_width_max})` : ""}`).join(" · ");
+  $("mt-cpu").innerHTML = cpu != null ? `${nf(cpu)}<small>%</small>` : "–";
+  $("mt-cpu-s").textContent = sel.map((p) => `${sel.length > 1 ? p.name + " " : ""}${p.stats.cpu_temp_c != null ? p.stats.cpu_temp_c + " °C" : ""}${p.stats.cpu_name ? " · " + p.stats.cpu_name : ""}`).join(" · ");
+  $("mt-ram").innerHTML = ramT ? `${nf(ramU / 1024, 1)}<small>/ ${nf(ramT / 1024)} GB</small>` : "–";
+  $("mt-ram-s").textContent = ramT ? `${nf(100 * ramU / ramT)} % belegt` : "";
+  spark("ms-tg", H.tg, null, "var(--c0)"); spark("ms-gpu", H.gpu, 100, "var(--c0)"); spark("ms-vram", H.vram, 100, "var(--c4)");
+  spark("ms-temp", H.temp, 100, "var(--c1)"); spark("ms-pow", H.pow, null, "var(--c3)"); spark("ms-cpu", H.cpu, 100, "var(--c2)"); spark("ms-ram", H.ram, 100, "var(--c5)");
+  const fill = lr && lr.ctx ? Math.min(100, 100 * lr.prompt / lr.ctx) : null, R = 46, C = 2 * Math.PI * R;
+  $("m-gauge").innerHTML = `<svg width="130" height="130" viewBox="0 0 130 130"><circle cx="65" cy="65" r="${R}" fill="none" stroke="var(--line)" stroke-width="12"/>${fill != null ? `<circle cx="65" cy="65" r="${R}" fill="none" stroke="var(--c0)" stroke-width="12" stroke-linecap="round" stroke-dasharray="${(C * fill / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 65 65)"/>` : ""}<text x="65" y="63" text-anchor="middle" font-size="22" font-weight="650" fill="var(--text)">${fill != null ? nf(fill) + " %" : "–"}</text><text x="65" y="83" text-anchor="middle" font-size="11" fill="var(--muted)">${lr && lr.ctx ? `${nf(lr.prompt / 1000, 1)}k / ${nf(lr.ctx / 1024)}k` : "keine Anfrage"}</text></svg>`;
+  const rp = lr && lr.prompt ? 100 * lr.reused / lr.prompt : 0;
+  $("m-reuse").style.width = rp + "%"; $("m-reuse-t").textContent = lr ? `${nf(lr.reused)} von ${nf(lr.prompt)}` : "–";
+  const tot = cl.totals || {}, ra = tot.prompt ? 100 * tot.reused / tot.prompt : 0;
+  $("m-reuse-all").style.width = ra + "%"; $("m-reuse-all-t").textContent = tot.prompt ? `${nf(ra)} %` : "–";
+  const when = (t) => new Date(t * 1000).toLocaleTimeString("de-DE");
+  $("m-req").innerHTML = reqs.slice(0, mon.all ? 200 : 12).map((r) => `<tr><td>${when(r.t)}</td><td>${esc(r.client || "–")}</td><td class="mname" title="${esc((r.model || "") + " @" + (r.where || ""))}">${esc(String(r.model || "").replace(/-\d{5}-of-\d{5}$/, ""))}${r.image ? " 🖼" : ""}<span class="muted"> @${esc(r.where || "")}</span></td><td class="num">${r.spec != null ? nf(r.spec * 100) + " %" : "–"}</td><td><span class="st${r.status && r.status !== 200 ? " bad" : ""}">${r.status === 200 ? "fertig" : r.status === 499 ? "abgebrochen" : r.status || "?"}</span></td><td class="num">${nf(r.prompt)}</td><td class="num">${nf(r.reused)}</td><td class="num">${nf(r.output)}</td><td class="num">${r.pp ? nf(r.pp) : "–"}</td><td class="num">${r.tg ? nf(r.tg, 1) : "–"}</td><td class="num">${nf(r.secs, 1)} s</td></tr>`).join("") || `<tr><td colspan="11" class="muted">Noch keine Anfragen.</td></tr>`;
+  $("m-sum").textContent = tot.n ? `Seit ${new Date(tot.since * 1000).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}: ${nf(tot.n)} Anfragen · ${nf(tot.prompt)} Prompt-Token (${nf(ra)} % aus dem Cache) · gelesen mit ${tot.pp_ms ? nf((tot.prompt - tot.reused) / (tot.pp_ms / 1000)) : "–"} t/s · ${nf(tot.output)} Token geschrieben mit ${tot.tg_ms ? nf(tot.output / (tot.tg_ms / 1000), 1) : "–"} t/s` : "";
 }
 
 boot();
