@@ -108,6 +108,7 @@ DEFAULTS = {
         "hybrid": False,
         "docling": True,
         "docling_workers": 2,
+        "ocr": "auto",           # auto | force | off
     },
     "users": {
         "signup": True,           # users may register, the admin unlocks them
@@ -217,6 +218,8 @@ def validate(cfg: dict) -> list[str]:
         errs.append("Chunk-Größe zwischen 200 und 8000.")
     if not (0 <= int(r["chunk_overlap"]) < int(r["chunk_size"])):
         errs.append("Overlap muss kleiner als die Chunk-Größe sein.")
+    if r["ocr"] not in ("auto", "force", "off"):
+        errs.append("Unbekannte OCR-Einstellung.")
     if not (1 <= int(r["top_k"]) <= 50):
         errs.append("Top K zwischen 1 und 50.")
     return errs
@@ -333,10 +336,17 @@ def render_compose(cfg: dict) -> dict:
         "ENABLE_RAG_HYBRID_SEARCH": "true" if r["hybrid"] else "false",
         "RAG_TEMPLATE": RAG_TEMPLATE,
         "ANONYMIZED_TELEMETRY": "false",
+        # Updates come with Formica (tested versions), not from the banner in Open WebUI
+        "ENABLE_VERSION_UPDATE_CHECK": "false",
     }
     if r["docling"]:
         webui_env["CONTENT_EXTRACTION_ENGINE"] = "docling"
         webui_env["DOCLING_SERVER_URL"] = "http://docling:5001"
+        params = {"do_ocr": r["ocr"] != "off", "table_mode": "accurate"}
+        if r["ocr"] != "off":
+            params["force_ocr"] = r["ocr"] == "force"
+            params["ocr_lang"] = ["de", "en"]
+        webui_env["DOCLING_PARAMS"] = json.dumps(params)
 
     depends = {"postgres": {"condition": "service_healthy"},
                "qdrant": {"condition": "service_started"},

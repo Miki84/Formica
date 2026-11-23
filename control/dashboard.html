@@ -218,6 +218,9 @@
         <div class="row"><span class="lbl">Docling</span>
           <div><label class="switch"><input type="checkbox" id="rag.docling"> Dokumente mit Docling lesen (Tabellen, Layout, Texterkennung)</label>
             <div class="hint">Aus: einfache Textextraktion von Open WebUI. Tabellen gehen dabei verloren.</div></div></div>
+        <div class="row"><label class="lbl" for="rag.ocr">Texterkennung (OCR)</label>
+          <div><select id="rag.ocr"><option value="auto">Automatisch (nur Seiten ohne Text)</option><option value="force">Erzwingen (jede Seite, auch eingebettete Bilder)</option><option value="off">Aus</option></select>
+            <div class="hint">„Erzwingen“ für PDFs, in denen Teile als Bild stecken (Angebote, Scans mit Textebene). Langsamer, liest dafür alles.</div></div></div>
         <div class="row"><label class="lbl" for="rag.docling_workers">Docling-Worker</label>
           <div><input type="number" id="rag.docling_workers" min="1" max="16"><div class="hint">Mehr Worker verarbeiten mehr Dateien gleichzeitig, brauchen aber mehr CPU und RAM.</div></div></div>
         <div class="row"><label class="lbl" for="rag.embedding_model">Embedding-Modell</label>
