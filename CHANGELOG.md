@@ -1,5 +1,9 @@
 # Änderungen
 
+## 0.3.1
+- „Von Formica gesetzt“ zeigt jetzt Name und Wert jeder Variable; Passwörter und Keys verdeckt mit „anzeigen“, lange Werte gekürzt mit „ganz anzeigen“
+- Knopf „Anpassen“ übernimmt eine Variable mit ihrem Wert als eigenen Eintrag; überschriebene Werte sind durchgestrichen
+
 ## 0.3.0
 - Neue Startseite „Cockpit“ wie im meloki AdminPACK: Lösungskarten mit Status, Updates, Monitoring (CPU, RAM, GPU, Speicher, GPU-Verlauf der letzten 5 Minuten, Ereignisse), Sicherheit, Backup, Modell-Backend, System
 - Neuer Reiter „Lösungen“: Lösungen und Verbünde aktivieren und deaktivieren, starten, stoppen, neu starten

@@ -747,11 +747,23 @@ def clean_extra_env(raw) -> tuple[dict, list[str]]:
     return out, errs
 
 
+SECRET_NAME = re.compile(r"(KEY|SECRET|PASSWORD|TOKEN)", re.I)
+
+
 def managed_env(cfg: dict) -> dict:
-    """The variables Formica itself sets, per service (names only)."""
+    """The variables Formica itself sets, per service: name, value, secret or not."""
     base = dict(cfg, extra_env={})
-    return {name: sorted((svc.get("environment") or {}).keys())
-            for name, svc in render_compose(base)["services"].items()}
+    secrets_ = {v for v in cfg["secrets"].values() if v} | {v for v in (cfg["backend"]["key"],
+                                                                         cfg["rag"].get("embedding_key")) if v}
+    out = {}
+    for name, svc in render_compose(base)["services"].items():
+        rows = []
+        for k, v in sorted((svc.get("environment") or {}).items()):
+            v = str(v)
+            secret = bool(SECRET_NAME.search(k)) and v not in ("none", "") or any(x in v for x in secrets_)
+            rows.append({"key": k, "value": v, "secret": secret})
+        out[name] = rows
+    return out
 
 
 def render(cfg: dict) -> None:

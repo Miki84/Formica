@@ -188,6 +188,11 @@
   .env-row input { max-width: none !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
   .env-flag { grid-column: 1 / -1; font-size: 12px; margin-top: -2px; }
   .env-flag.warn { color: var(--warn); } .env-flag.bad { color: var(--bad); }
+  table.menv td { white-space: normal; vertical-align: top; }
+  table.menv td.k { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; }
+  table.menv td.v code { font-size: 12.5px; word-break: break-all; white-space: pre-wrap; color: var(--text); }
+  table.menv tr.overridden td.k, table.menv tr.overridden td.v code { color: var(--muted); text-decoration: line-through; }
+  button.lnk { background: none; border: 0; color: var(--focus); cursor: pointer; font: inherit; font-size: 12px; padding: 0 2px; }
   details.managed summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 12px; }
   .hidden { display: none !important; }
   .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -625,7 +630,7 @@ function renderHeader(r) {
 document.querySelectorAll("input[name=access]").forEach(r => r.addEventListener("change", accessVisibility));
 // ---------- Eigene Umgebungsvariablen ----------
 const ENV_SVCS = [["open-webui", "Open WebUI"], ["docling", "Docling"], ["qdrant", "Qdrant"], ["embeddings", "Embeddings"], ["postgres", "PostgreSQL"], ["caddy", "Caddy"]];
-let EXTRA = {}, MANAGED = {}, CRITICAL = [], ENV_SVC = "open-webui";
+let EXTRA = {}, MANAGED = {}, CRITICAL = [], ENV_SVC = "open-webui", ENV_SHOW = {};
 function envLoad(r) {
   EXTRA = {};
   for (const [svc, env] of Object.entries(r.config.extra_env || {})) EXTRA[svc] = Object.entries(env).map(([key, value]) => ({ key, value }));
@@ -635,7 +640,7 @@ function envLoad(r) {
 function envRender() {
   $("env-svc").innerHTML = ENV_SVCS.map(([k, l]) => { const n = (EXTRA[k] || []).filter((x) => x.key).length;
     return `<button type="button" data-svc="${k}" aria-pressed="${k === ENV_SVC}">${esc(l)}${n ? `<span class="n">${n}</span>` : ""}</button>`; }).join("");
-  const rows = EXTRA[ENV_SVC] || [], managed = MANAGED[ENV_SVC] || [];
+  const rows = EXTRA[ENV_SVC] || [], mrows = MANAGED[ENV_SVC] || [], managed = mrows.map((m) => m.key);
   $("env-rows").innerHTML = rows.map((x, i) => {
     const k = x.key.trim(), bad = k && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k), crit = CRITICAL.includes(k), over = managed.includes(k);
     const flag = bad ? '<div class="env-flag bad">Ungültiger Name: nur Buchstaben, Ziffern und _</div>'
@@ -647,13 +652,31 @@ function envRender() {
     || '<p class="muted small" style="margin-top:8px">Keine eigenen Variablen für diesen Dienst.</p>';
   $("env-off").textContent = MANAGED[ENV_SVC] ? "" : "Dieser Dienst läuft zurzeit nicht (abgeschaltet oder extern). Die Variablen gelten, sobald er wieder läuft.";
   $("env-mcount").textContent = managed.length;
-  $("env-managed").innerHTML = managed.map((k) => `<span class="tag" style="font-family:ui-monospace,monospace">${esc(k)}</span>`).join("") || '<span class="muted small">keine</span>';
+  const own = new Set(rows.map((x) => x.key.trim()));
+  $("env-managed").innerHTML = mrows.length ? `<table class="req menv"><thead><tr><th>Name</th><th>Wert</th><th></th></tr></thead><tbody>${mrows.map((m, i) => {
+      const long = m.value.length > 90 || m.value.includes("\n");
+      const shown = m.secret && !ENV_SHOW[ENV_SVC + m.key] ? "•".repeat(12) : (long && !m.secret && !ENV_SHOW[ENV_SVC + m.key + ":full"] ? m.value.replace(/\s+/g, " ").slice(0, 90) + " …" : m.value);
+      return `<tr${own.has(m.key) ? ' class="overridden" title="Wird von Ihrem eigenen Eintrag überschrieben"' : ""}><td class="k">${esc(m.key)}</td>
+        <td class="v"><code>${esc(shown)}</code>${m.secret ? ` <button class="lnk" type="button" data-show="${i}">${ENV_SHOW[ENV_SVC + m.key] ? "verbergen" : "anzeigen"}</button>` : ""}${long && !m.secret ? ` <button class="lnk" type="button" data-full="${i}">${ENV_SHOW[ENV_SVC + m.key + ":full"] ? "kürzen" : "ganz anzeigen"}</button>` : ""}</td>
+        <td class="right">${own.has(m.key) ? '<span class="small" style="color:var(--warn)">überschrieben</span>' : (m.value.includes("\n") ? '<span class="small muted" title="Mehrzeilige Werte lassen sich hier nicht ändern">mehrzeilig</span>' : `<button class="btn small" type="button" data-adopt="${i}" title="Als eigene Variable übernehmen und anpassen">Anpassen</button>`)}</td></tr>`; }).join("")}</tbody></table>`
+    : '<span class="muted small">keine</span>';
 }
 $("env-svc").addEventListener("click", (ev) => { const b = ev.target.closest("[data-svc]"); if (b) { ENV_SVC = b.dataset.svc; envRender(); } });
 $("env-rows").addEventListener("input", (ev) => {
   const i = ev.target.dataset.i, f = ev.target.dataset.f; if (i === undefined) return;
   EXTRA[ENV_SVC][i][f] = ev.target.value;
   if (f === "key") { const pos = ev.target.selectionStart; envRender(); const el = $("env-rows").querySelector(`[data-i="${i}"][data-f="key"]`); el.focus(); el.setSelectionRange(pos, pos); }
+});
+$("env-managed").addEventListener("click", (ev) => {
+  const d = ev.target.dataset, m = (MANAGED[ENV_SVC] || [])[d.show ?? d.full ?? d.adopt];
+  if (!m) return;
+  if (d.show !== undefined) ENV_SHOW[ENV_SVC + m.key] = !ENV_SHOW[ENV_SVC + m.key];
+  if (d.full !== undefined) ENV_SHOW[ENV_SVC + m.key + ":full"] = !ENV_SHOW[ENV_SVC + m.key + ":full"];
+  if (d.adopt !== undefined) {
+    (EXTRA[ENV_SVC] = EXTRA[ENV_SVC] || []).push({ key: m.key, value: m.value });
+    msg("f-msg", "warn", `${m.key} ist jetzt eine eigene Variable. Wert anpassen, dann unten speichern und übernehmen.`);
+  }
+  envRender();
 });
 $("env-rows").addEventListener("click", (ev) => { const d = ev.target.dataset.del; if (d !== undefined) { EXTRA[ENV_SVC].splice(Number(d), 1); envRender(); } });
 function envAdd() { (EXTRA[ENV_SVC] = EXTRA[ENV_SVC] || []).push({ key: "", value: "" }); envRender(); const ins = $("env-rows").querySelectorAll('[data-f="key"]'); ins[ins.length - 1].focus(); }
