@@ -1,5 +1,10 @@
 # Änderungen
 
+## 0.2.3
+- Einstellungen → „Erweitert: eigene Umgebungsvariablen“ je Dienst (Open WebUI, Docling, Qdrant, Embeddings, PostgreSQL, Caddy), wie bei meloki
+- Markiert, wenn ein Eintrag einen Wert von Formica überschreibt; Warnung bei Variablen, die die Dienste miteinander verbinden
+- Liste der Variablen, die Formica selbst setzt
+
 ## 0.2.2
 - Adressen dürfen jetzt auch mit dem vollen Pfad eingetragen werden (…/v1/embeddings, …/v1/chat/completions): Formica nimmt die Basisadresse
 

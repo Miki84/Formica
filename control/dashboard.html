@@ -132,6 +132,15 @@
   .mbar > i { display: block; height: 100%; background: var(--c, var(--c0)); }
   .section-t { margin: 26px 0 10px; display: flex; align-items: baseline; gap: 10px; }
   @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, 1fr); } .mon-row { grid-template-columns: 1fr; } }
+  .env-svc { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+  .env-svc button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+  .env-svc button[aria-pressed="true"] { color: var(--text); border-color: var(--c0); }
+  .env-svc button .n { color: var(--c0); margin-left: 4px; }
+  .env-row { display: grid; grid-template-columns: minmax(160px, 1fr) 16px minmax(200px, 2fr) auto; gap: 8px; align-items: center; margin-top: 8px; }
+  .env-row input { max-width: none !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .env-flag { grid-column: 1 / -1; font-size: 12px; margin-top: -2px; }
+  .env-flag.warn { color: var(--warn); } .env-flag.bad { color: var(--bad); }
+  details.managed summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 12px; }
   .hidden { display: none !important; }
   .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--line) 80%, transparent); overflow: hidden; margin-top: 5px; }
@@ -386,6 +395,16 @@
           <div><select id="users.default_role"><option value="pending">Ausstehend (Admin schaltet frei)</option><option value="user">Benutzer (sofort Zugriff)</option></select></div></div>
       </div>
 
+      <div class="card"><h2>Erweitert: eigene Umgebungsvariablen</h2>
+        <p class="hint">Für Funktionen, die Formica (noch) nicht als Einstellung anbietet, z. B. aus der <a href="https://docs.openwebui.com/getting-started/env-configuration" target="_blank" rel="noopener">Open-WebUI-Dokumentation</a>.
+          Ihre Einträge ergänzen die Werte von Formica. Gleichnamige Werte von Formica werden überschrieben (markiert).</p>
+        <div class="env-svc" id="env-svc"></div>
+        <div id="env-rows"></div>
+        <div class="flex" style="margin-top:10px"><button class="btn small" type="button" onclick="envAdd()">+ Variable</button>
+          <span class="muted small" id="env-off"></span></div>
+        <details class="managed"><summary>Von Formica gesetzt (<span id="env-mcount">0</span>)</summary><div id="env-managed" style="margin-top:8px"></div></details>
+      </div>
+
       <div class="flex"><button class="btn primary" onclick="saveConfig()">Speichern</button>
         <span class="muted small">Danach oben auf „Übernehmen“, damit die Dienste neu starten.</span></div>
     </form>
@@ -478,6 +497,7 @@ function fields() { return [...$("form").querySelectorAll("input[id], select[id]
 async function loadConfig() {
   const r = await api("/api/config");
   CFG = r.config;
+  envLoad(r);
   for (const el of fields()) {
     const [sec, key] = el.id.split(".");
     const v = CFG[sec]?.[key];
@@ -503,6 +523,41 @@ function renderHeader(r) {
   else p.classList.add("hidden");
 }
 document.querySelectorAll("input[name=access]").forEach(r => r.addEventListener("change", accessVisibility));
+// ---------- Eigene Umgebungsvariablen ----------
+const ENV_SVCS = [["open-webui", "Open WebUI"], ["docling", "Docling"], ["qdrant", "Qdrant"], ["embeddings", "Embeddings"], ["postgres", "PostgreSQL"], ["caddy", "Caddy"]];
+let EXTRA = {}, MANAGED = {}, CRITICAL = [], ENV_SVC = "open-webui";
+function envLoad(r) {
+  EXTRA = {};
+  for (const [svc, env] of Object.entries(r.config.extra_env || {})) EXTRA[svc] = Object.entries(env).map(([key, value]) => ({ key, value }));
+  MANAGED = r.managed_env || {}; CRITICAL = r.critical_env || [];
+  envRender();
+}
+function envRender() {
+  $("env-svc").innerHTML = ENV_SVCS.map(([k, l]) => { const n = (EXTRA[k] || []).filter((x) => x.key).length;
+    return `<button type="button" data-svc="${k}" aria-pressed="${k === ENV_SVC}">${esc(l)}${n ? `<span class="n">${n}</span>` : ""}</button>`; }).join("");
+  const rows = EXTRA[ENV_SVC] || [], managed = MANAGED[ENV_SVC] || [];
+  $("env-rows").innerHTML = rows.map((x, i) => {
+    const k = x.key.trim(), bad = k && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k), crit = CRITICAL.includes(k), over = managed.includes(k);
+    const flag = bad ? '<div class="env-flag bad">Ungültiger Name: nur Buchstaben, Ziffern und _</div>'
+      : crit ? '<div class="env-flag bad">Achtung: verbindet die Dienste miteinander. Ein falscher Wert lässt Open WebUI leer starten oder findet keine Dokumente mehr.</div>'
+      : over ? '<div class="env-flag warn">Überschreibt den Wert von Formica.</div>' : "";
+    return `<div class="env-row"><input type="text" data-i="${i}" data-f="key" value="${esc(x.key)}" placeholder="NAME" spellcheck="false">
+      <span class="muted">=</span><input type="text" data-i="${i}" data-f="value" value="${esc(x.value)}" placeholder="Wert" spellcheck="false">
+      <button class="btn small" type="button" data-del="${i}" title="Entfernen">✕</button>${flag}</div>`; }).join("")
+    || '<p class="muted small" style="margin-top:8px">Keine eigenen Variablen für diesen Dienst.</p>';
+  $("env-off").textContent = MANAGED[ENV_SVC] ? "" : "Dieser Dienst läuft zurzeit nicht (abgeschaltet oder extern). Die Variablen gelten, sobald er wieder läuft.";
+  $("env-mcount").textContent = managed.length;
+  $("env-managed").innerHTML = managed.map((k) => `<span class="tag" style="font-family:ui-monospace,monospace">${esc(k)}</span>`).join("") || '<span class="muted small">keine</span>';
+}
+$("env-svc").addEventListener("click", (ev) => { const b = ev.target.closest("[data-svc]"); if (b) { ENV_SVC = b.dataset.svc; envRender(); } });
+$("env-rows").addEventListener("input", (ev) => {
+  const i = ev.target.dataset.i, f = ev.target.dataset.f; if (i === undefined) return;
+  EXTRA[ENV_SVC][i][f] = ev.target.value;
+  if (f === "key") { const pos = ev.target.selectionStart; envRender(); const el = $("env-rows").querySelector(`[data-i="${i}"][data-f="key"]`); el.focus(); el.setSelectionRange(pos, pos); }
+});
+$("env-rows").addEventListener("click", (ev) => { const d = ev.target.dataset.del; if (d !== undefined) { EXTRA[ENV_SVC].splice(Number(d), 1); envRender(); } });
+function envAdd() { (EXTRA[ENV_SVC] = EXTRA[ENV_SVC] || []).push({ key: "", value: "" }); envRender(); const ins = $("env-rows").querySelectorAll('[data-f="key"]'); ins[ins.length - 1].focus(); }
+
 function embedVisibility() {
   const v = $("rag.embedding_source").value;
   document.querySelectorAll(".emb-custom").forEach(e => e.classList.toggle("hidden", v !== "custom"));
@@ -529,12 +584,13 @@ function formData() {
     d[sec][key] = el.type === "checkbox" ? el.checked : (el.type === "number" ? Number(el.value) : el.value);
   }
   d.general.access = document.querySelector("input[name=access]:checked")?.value || "http";
+  d.extra_env = EXTRA;
   return d;
 }
 async function saveConfig() {
   const r = await api("/api/config", formData());
   if (r._status !== 200) return msg("f-msg", "bad", r.error);
-  if (r.errors.length) msg("f-msg", "warn", "Gespeichert, aber noch nicht vollständig:", r.errors);
+  if (r.errors && r.errors.length) msg("f-msg", "warn", "Gespeichert, aber noch nicht vollständig:", r.errors);
   else msg("f-msg", "ok", "Gespeichert. Jetzt oben auf „Übernehmen“ klicken.");
   await loadConfig();
   window.scrollTo({ top: 0, behavior: "smooth" });

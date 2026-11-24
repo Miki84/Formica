@@ -488,6 +488,10 @@ def render_compose(cfg: dict) -> dict:
             "networks": ["formica"],
         }
 
+    for name, extra in (cfg.get("extra_env") or {}).items():
+        if name in services and extra:
+            services[name].setdefault("environment", {}).update(extra)
+
     return {
         "name": PROJECT,
         "services": services,
@@ -495,6 +499,48 @@ def render_compose(cfg: dict) -> dict:
                                     "qdrant_data", "embeddings_models")},
         "networks": {"formica": {}},
     }
+
+
+# Own environment variables (Einstellungen > Erweitert): per service, on top of Formica's
+EXTRA_SERVICES = ("open-webui", "docling", "qdrant", "embeddings", "postgres", "caddy")
+ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# changing these breaks the wiring between the services (empty start, no documents)
+CRITICAL_ENV = {"DATABASE_URL", "VECTOR_DB", "QDRANT_URI", "QDRANT_API_KEY", "WEBUI_SECRET_KEY",
+                "POSTGRES_PASSWORD", "POSTGRES_USER", "POSTGRES_DB", "QDRANT__SERVICE__API_KEY",
+                "ENABLE_PERSISTENT_CONFIG", "LLAMA_CACHE"}
+
+
+def clean_extra_env(raw) -> tuple[dict, list[str]]:
+    """{service: [{key, value}]} from the form -> {service: {KEY: value}}, errors."""
+    out, errs = {}, []
+    if not isinstance(raw, dict):
+        return out, errs
+    for svc, rows in raw.items():
+        if svc not in EXTRA_SERVICES or not isinstance(rows, list):
+            continue
+        env = {}
+        for row in rows:
+            key = str((row or {}).get("key", "")).strip()
+            val = str((row or {}).get("value", ""))
+            if not key:
+                continue
+            if not ENV_KEY.match(key):
+                errs.append(f"{svc}: ungültiger Name „{key}“ (nur Buchstaben, Ziffern, _)")
+                continue
+            if "\n" in val:
+                errs.append(f"{svc}: {key} darf keinen Zeilenumbruch enthalten")
+                continue
+            env[key] = val
+        if env:
+            out[svc] = env
+    return out, errs
+
+
+def managed_env(cfg: dict) -> dict:
+    """The variables Formica itself sets, per service (names only)."""
+    base = dict(cfg, extra_env={})
+    return {name: sorted((svc.get("environment") or {}).keys())
+            for name, svc in render_compose(base)["services"].items()}
 
 
 def render(cfg: dict) -> None:
@@ -1130,7 +1176,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/config":
             cfg = load_config()
             return self._json(200, {"config": public_config(cfg), "webui_url": webui_url(cfg),
-                                    "errors": validate(cfg), "applied": cfg.get("applied")})
+                                    "errors": validate(cfg), "applied": cfg.get("applied"),
+                                    "managed_env": managed_env(cfg), "critical_env": sorted(CRITICAL_ENV)})
         if path == "/api/services":
             return self._json(200, {"services": services_status(), "job": JOB.state()})
         if path == "/api/job":
@@ -1229,10 +1276,16 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = update_from_form(cfg, data)
             except (TypeError, ValueError) as e:
                 return self._json(400, {"error": f"Ungültiger Wert: {e}"})
+            if "extra_env" in data:
+                extra, env_errs = clean_extra_env(data["extra_env"])
+                if env_errs:
+                    return self._json(400, {"error": "Eigene Umgebungsvariablen: " + "; ".join(env_errs)})
+                cfg["extra_env"] = extra
             errs = validate(cfg)
             save_config(cfg)
             return self._json(200, {"ok": not errs, "errors": errs, "config": public_config(cfg),
-                                    "webui_url": webui_url(cfg)})
+                                    "webui_url": webui_url(cfg), "managed_env": managed_env(cfg),
+                                    "critical_env": sorted(CRITICAL_ENV)})
         if path == "/api/test-embeddings":
             cfg = load_config()
             try:
