@@ -110,7 +110,11 @@ IMAGES = {
     "searxng": "searxng/searxng:latest",
     "whisper": "ghcr.io/speaches-ai/speaches:latest-cpu",
     "n8n": "docker.n8n.io/n8nio/n8n:latest",
+    "files": "formica-files:local",          # built from app/services/files
+    "images": "ghcr.io/leejet/stable-diffusion.cpp:master-vulkan",
+    "images-model": "curlimages/curl:latest",
 }
+IMAGES_CUDA = "ghcr.io/leejet/stable-diffusion.cpp:master-cuda"
 
 MODULES = [
     # name, label, what it does, can be switched off
@@ -123,6 +127,9 @@ MODULES = [
     ("searxng", "SearXNG", "Metasuchmaschine für die Websuche in Open WebUI", True),
     ("whisper", "Whisper (speaches)", "Spracherkennung für die Spracheingabe im Chat", True),
     ("n8n", "n8n", "Workflows und Automatisierung", True),
+    ("files", "Dateien erzeugen", "Excel, Word, PDF und CSV aus dem Chat", True),
+    ("images", "Bilder erzeugen (sd-server)", "Stable Diffusion über stable-diffusion.cpp", True),
+    ("images-model", "Bildmodell laden", "Lädt das Bildmodell einmalig herunter", True),
 ]
 
 # Solutions (what the cockpit shows): a solution or a bundle of services.
@@ -134,11 +141,26 @@ CATALOG = [
      "desc": "SearXNG: Open WebUI kann im Internet suchen", "services": ["searxng"]},
     {"id": "whisper", "label": "Whisper", "icon": "mic",
      "desc": "Spracheingabe im Chat (Speech-to-Text)", "services": ["whisper"]},
+    {"id": "files", "label": "Dateien erzeugen", "icon": "file",
+     "desc": "Excel, Word, PDF und CSV direkt aus dem Chat", "services": ["files"]},
+    {"id": "images", "label": "Bilder erzeugen", "icon": "image",
+     "desc": "Bilder aus Text (Stable Diffusion), im Chat über das Bild-Symbol", "services": ["images-model", "images"]},
     {"id": "n8n", "label": "n8n", "icon": "flow",
      "desc": "Workflows und Automatisierung", "services": ["n8n"], "web": ("n8n", 5678),
      "routing": {"type": "port", "port": 5678, "sub": "n8n"}},
 ]
 CATALOG_BY_ID = {c["id"]: c for c in CATALOG}
+IMAGE_MODELS = {
+    "sd15": {"label": "Stable Diffusion 1.5 (klein, kommerzielle Nutzung erlaubt)",
+             "url": "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly-fp16.safetensors",
+             "file": "v1-5-pruned-emaonly-fp16.safetensors", "steps": 20, "cfg": 7.0, "size": "512x512"},
+    "sd-turbo": {"label": "SD Turbo (schnell, Lizenz vor kommerzieller Nutzung prüfen)",
+                 "url": "https://huggingface.co/stabilityai/sd-turbo/resolve/main/sd_turbo.safetensors",
+                 "file": "sd_turbo.safetensors", "steps": 4, "cfg": 1.0, "size": "512x512"},
+    "sdxl-turbo": {"label": "SDXL Turbo (bessere Bilder, GPU empfohlen, Lizenz prüfen)",
+                   "url": "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors",
+                   "file": "sd_xl_turbo_1.0_fp16.safetensors", "steps": 4, "cfg": 1.0, "size": "512x512"},
+}
 WHISPER_MODELS = ["Systran/faster-whisper-small", "Systran/faster-whisper-medium",
                   "deepdml/faster-whisper-large-v3-turbo-ct2", "Systran/faster-distil-whisper-large-v3"]
 
@@ -235,7 +257,7 @@ def load_config() -> dict:
         cfg = _merge(DEFAULTS, raw)
         sec = cfg.setdefault("secrets", {})
         changed = False
-        for k in ("pg_password", "qdrant_key", "webui_secret", "searxng_secret"):
+        for k in ("pg_password", "qdrant_key", "webui_secret", "searxng_secret", "files_key"):
             if not sec.get(k):
                 sec[k] = secrets.token_hex(24)  # hex: safe inside URLs
                 changed = True
@@ -305,7 +327,10 @@ def solution_conf(cfg: dict, sid: str) -> dict:
     raw = (cfg.get("solutions") or {}).get(sid) or {}
     routing = dict(cat.get("routing") or {"type": "none", "port": 0, "sub": ""})
     routing.update(raw.get("routing") or {})
-    settings = {"model": WHISPER_MODELS[0]} if sid == "whisper" else {}
+    settings = {"whisper": {"model": WHISPER_MODELS[0]},
+                "files": {"keep_days": 7},
+                "images": {"mode": "cpu", "model": "sd15", "size": "", "url": "", "key": "", "ext_model": ""},
+                }.get(sid, {})
     settings.update(raw.get("settings") or {})
     return {"enabled": bool(cat.get("core") or raw.get("enabled")), "routing": routing, "settings": settings}
 
@@ -323,6 +348,8 @@ def enabled_services(cfg: dict) -> list[str]:
             if svc == "docling" and not cfg["rag"]["docling"]:
                 continue
             if svc == "embeddings" and cfg["rag"]["embedding_source"] != "local":
+                continue
+            if svc in ("images", "images-model") and solution_conf(cfg, "images")["settings"]["mode"] == "external":
                 continue
             out.append(svc)
     out += ["custom-" + c["id"] for c in custom_solutions(cfg) if c.get("enabled", True)]
@@ -483,6 +510,9 @@ def webui_url(cfg: dict) -> str:
 def render_caddyfile(cfg: dict) -> str:
     g = cfg["general"]
     upstream = "reverse_proxy open-webui:8080"
+    if "files" in enabled_services(cfg):  # downloads of "Dateien erzeugen"
+        upstream = ("handle_path /formica-files/* {\n\t\treverse_proxy files:8000\n\t}\n"
+                    "\thandle {\n\t\treverse_proxy open-webui:8080\n\t}")
     glob = ["admin off"]
     if g["access"] in ("http", "proxy"):
         glob.append("auto_https off")
@@ -571,6 +601,24 @@ def render_compose(cfg: dict) -> dict:
         webui_env.update({"ENABLE_WEB_SEARCH": "true", "WEB_SEARCH_ENGINE": "searxng",
                           "SEARXNG_QUERY_URL": "http://searxng:8080/search?q=<query>",
                           "WEB_SEARCH_RESULT_COUNT": "5"})
+    if "files" in active:
+        webui_env["TOOL_SERVER_CONNECTIONS"] = json.dumps([{
+            "type": "openapi", "url": "http://files:8000", "spec_type": "url", "spec": "", "path": "openapi.json",
+            "auth_type": "bearer", "key": s["files_key"], "config": {"enable": True, "access_control": None},
+            "info": {"id": "formica-files", "name": "Dateien erzeugen",
+                     "description": "Excel, Word, PDF und CSV erstellen und als Download-Link zurückgeben"}}])
+    im = solution_conf(cfg, "images")
+    if im["enabled"]:
+        ims = im["settings"]
+        preset = IMAGE_MODELS.get(ims.get("model"), IMAGE_MODELS["sd15"])
+        if ims.get("mode") == "external":
+            base, key, model = normalize_backend_url(ims.get("url", "")), ims.get("key") or "none", ims.get("ext_model") or "dall-e-3"
+        else:
+            base, key, model = "http://images:1234/v1", "none", ims.get("model") or "sd15"
+        webui_env.update({"ENABLE_IMAGE_GENERATION": "true", "IMAGE_GENERATION_ENGINE": "openai",
+                          "IMAGES_OPENAI_API_BASE_URL": base, "IMAGES_OPENAI_API_KEY": key,
+                          "IMAGE_GENERATION_MODEL": model, "IMAGE_SIZE": ims.get("size") or preset["size"],
+                          "ENABLE_IMAGE_PROMPT_GENERATION": "false"})
     if "whisper" in active:
         webui_env.update({"AUDIO_STT_ENGINE": "openai", "AUDIO_STT_OPENAI_API_BASE_URL": "http://whisper:8000/v1",
                           "AUDIO_STT_OPENAI_API_KEY": "none",
@@ -679,6 +727,41 @@ def render_compose(cfg: dict) -> dict:
             "image": IMAGES["n8n"], "restart": "unless-stopped", "environment": n8n_env,
             "volumes": ["n8n_data:/home/node/.n8n"], "networks": ["formica"],
         }
+    if "files" in active:
+        services["files"] = {
+            "build": {"context": str(HOME / "app" / "services" / "files")},
+            "image": IMAGES["files"], "restart": "unless-stopped",
+            "environment": {"FILES_PUBLIC_URL": webui_url(cfg).rstrip("/") + "/formica-files",
+                            "FILES_API_KEY": s["files_key"],
+                            "FILES_KEEP_DAYS": str(solution_conf(cfg, "files")["settings"].get("keep_days") or 7)},
+            "volumes": ["files_data:/data"], "networks": ["formica"],
+        }
+    if "images" in active:
+        ims = solution_conf(cfg, "images")["settings"]
+        p = IMAGE_MODELS.get(ims.get("model"), IMAGE_MODELS["sd15"])
+        cuda = ims.get("mode") == "cuda"
+        services["images-model"] = {
+            "image": IMAGES["images-model"], "user": "0:0", "restart": "no",
+            "entrypoint": ["sh", "-c"],
+            "command": [f'test -s /models/{p["file"]} && echo "Modell vorhanden: {p["file"]}" || '
+                        f'(echo "Lade {p["file"]} ..." && curl -fL --retry 3 -o /models/{p["file"]}.part "{p["url"]}" '
+                        f'&& mv /models/{p["file"]}.part /models/{p["file"]} && echo fertig)'],
+            "volumes": ["images_models:/models"], "networks": ["formica"],
+        }
+        run_sd = (f"exec /sd.cpp/bin/sd-server --listen-ip 0.0.0.0 --listen-port 1234 --model-dir /models "
+                  f"-m /models/{p['file']} --steps {p['steps']} --cfg-scale {p['cfg']}")
+        svc = {
+            "image": IMAGES_CUDA if cuda else IMAGES["images"], "restart": "unless-stopped",
+            "entrypoint": ["sh", "-c"],
+            # without a GPU: drop the Vulkan backend, so the CPU backend does the work
+            "command": [run_sd if cuda else "rm -f /sd.cpp/bin/libggml-vulkan*.so; " + run_sd],
+            "depends_on": {"images-model": {"condition": "service_completed_successfully"}},
+            "volumes": ["images_models:/models"], "networks": ["formica"],
+        }
+        if cuda:
+            svc["deploy"] = {"resources": {"reservations": {"devices": [
+                {"driver": "nvidia", "count": "all", "capabilities": ["gpu"]}]}}}
+        services["images"] = svc
     custom_vols = []
     for cs in custom_solutions(cfg):
         if not cs.get("enabled", True):
@@ -707,6 +790,7 @@ def render_compose(cfg: dict) -> dict:
         "services": services,
         "volumes": {v: {} for v in ("caddy_data", "caddy_config", "openwebui_data", "postgres_data",
                                     "qdrant_data", "embeddings_models", "whisper_models", "n8n_data",
+                                    "files_data", "images_models",
                                     *custom_vols)},
         "networks": {"formica": {}},
     }
@@ -865,7 +949,7 @@ def apply_stack(pull: bool = False) -> bool:
     steps = []
     if pull:
         steps.append(compose_cmd("pull"))
-    steps.append(compose_cmd("up", "-d", "--remove-orphans"))
+    steps.append(compose_cmd("up", "-d", "--remove-orphans", "--build"))
     if before is not None and before != caddyfile.read_text():
         # a bind-mounted file: compose does not notice the change by itself
         steps.append(compose_cmd("restart", "caddy"))
@@ -919,7 +1003,7 @@ def solutions_status(cfg: dict) -> list[dict]:
     def overall(names, enabled):
         if not enabled:
             return "available"
-        states = [svc.get(n, {}).get("state", "fehlt") for n in names]
+        states = [svc.get(n, {}).get("state", "fehlt") for n in names if not n.endswith("-model")]
         if states and all(x == "running" for x in states):
             return "running"
         if any(x == "running" for x in states):
@@ -931,7 +1015,9 @@ def solutions_status(cfg: dict) -> list[dict]:
         rt = next((r for r in web_routes(cfg) if r["id"] == cat["id"]), None)
         out.append({"id": cat["id"], "label": cat["label"], "desc": cat["desc"], "icon": cat["icon"],
                     "core": bool(cat.get("core")), "custom": False, "enabled": sc["enabled"],
-                    "routing": sc["routing"] if cat.get("web") else None, "settings": sc["settings"],
+                    "routing": sc["routing"] if cat.get("web") else None,
+                    "settings": {**{k: v for k, v in sc["settings"].items() if k != "key"},
+                                 **({"key_set": bool(sc["settings"].get("key"))} if "key" in sc["settings"] else {})},
                     "url": webui_url(cfg) if cat["id"] == "chat" else (route_url(cfg, rt) if rt else None),
                     "state": overall(members, sc["enabled"]),
                     "members": [{"name": n, "label": next((m[1] for m in MODULES if m[0] == n), n),
@@ -1513,6 +1599,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/solutions":
             cfg = load_config()
             return self._json(200, {"solutions": solutions_status(cfg), "whisper_models": WHISPER_MODELS,
+                                    "image_models": {k: v["label"] for k, v in IMAGE_MODELS.items()},
                                     "job": JOB.state()})
         if path == "/api/events":
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -1687,8 +1774,25 @@ class Handler(BaseHTTPRequestHandler):
                                       "port": int(r.get("port") or 0), "sub": str(r.get("sub") or "").strip()}
                 if isinstance(data.get("settings"), dict):
                     st = dict(cur.get("settings") or {})
-                    if sid == "whisper" and data["settings"].get("model"):
-                        st["model"] = str(data["settings"]["model"]).strip()
+                    ds = data["settings"]
+                    if sid == "whisper" and ds.get("model"):
+                        st["model"] = str(ds["model"]).strip()
+                    if sid == "files" and ds.get("keep_days") is not None:
+                        st["keep_days"] = max(1, min(365, float(ds["keep_days"])))
+                    if sid == "images":
+                        if ds.get("mode") in ("cpu", "cuda", "external"):
+                            st["mode"] = ds["mode"]
+                        if ds.get("model") in IMAGE_MODELS:
+                            st["model"] = ds["model"]
+                        for k in ("size", "url", "ext_model"):
+                            if k in ds:
+                                st[k] = str(ds[k]).strip()
+                        if ds.get("key"):
+                            st["key"] = str(ds["key"]).strip()
+                        if st.get("size") and not re.match(r"^\d{3,4}x\d{3,4}$", st["size"]):
+                            return self._json(400, {"error": "Bildgröße im Format 512x512"})
+                        if st.get("mode") == "external" and not st.get("url"):
+                            return self._json(400, {"error": "Für einen externen Dienst bitte die Adresse angeben."})
                     cur["settings"] = st
                 cfg.setdefault("solutions", {})[sid] = cur
                 label = cat["label"]

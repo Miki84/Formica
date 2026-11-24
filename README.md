@@ -17,6 +17,8 @@ Formica (lateinisch „Ameise“) ist das Gegenstück zu [MyrmidLM](https://gith
 | SearXNG (optional) | Websuche in Open WebUI |
 | Whisper (optional) | Spracheingabe im Chat |
 | n8n (optional) | Workflows und Automatisierung |
+| Dateien erzeugen (optional) | Excel, Word, PDF und CSV aus dem Chat |
+| Bilder erzeugen (optional) | Stable Diffusion über stable-diffusion.cpp oder einen externen Dienst |
 | Eigene Lösungen | beliebige Container, über Port oder Subdomain erreichbar |
 | **Formica** | Verwaltungsoberfläche für alles oben |
 

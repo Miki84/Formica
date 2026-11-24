@@ -1,5 +1,10 @@
 # Änderungen
 
+## 0.4.0
+- Neue Lösung „Dateien erzeugen“: Open WebUI erstellt Excel (.xlsx), Word (.docx), PDF und CSV direkt aus dem Chat und gibt einen Download-Link zurück. Zahlen werden als Zahlen übernommen, auch im deutschen Format (11,25); Dateien werden nach einstellbarer Zeit gelöscht. Wird automatisch als Werkzeug in Open WebUI eingetragen.
+- Neue Lösung „Bilder erzeugen“: Stable Diffusion über stable-diffusion.cpp (sd-server) auf der CPU oder einer NVIDIA-GPU, Modell wählbar (SD 1.5, SD Turbo, SDXL Turbo, wird einmalig geladen), oder ein externer OpenAI-kompatibler Bilddienst
+- Docker-Images aus dem Formica-Repo werden beim Übernehmen gebaut
+
 ## 0.3.1
 - „Von Formica gesetzt“ zeigt jetzt Name und Wert jeder Variable; Passwörter und Keys verdeckt mit „anzeigen“, lange Werte gekürzt mit „ganz anzeigen“
 - Knopf „Anpassen“ übernimmt eine Variable mit ihrem Wert als eigenen Eintrag; überschriebene Werte sind durchgestrichen

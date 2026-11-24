@@ -299,7 +299,7 @@
 
     <div class="grid">
       <div class="card"><h2>Backup</h2>
-        <div class="checks"><div class="chk"><span class="dot"></span><div><b>Restore-Punkte</b><div class="muted small">Sicherung und Wiederherstellung je Lösung, lokal, SFTP oder S3, mit Zeitplan. Kommt mit Formica 0.4.</div></div></div>
+        <div class="checks"><div class="chk"><span class="dot"></span><div><b>Restore-Punkte</b><div class="muted small">Sicherung und Wiederherstellung je Lösung, lokal, SFTP oder S3, mit Zeitplan. Kommt mit Formica 0.5.</div></div></div>
           <div class="chk"><span class="dot ok"></span><div><b>Bis dahin</b><div class="muted small">Die ganze VM mit dem Proxmox Backup Server sichern.</div></div></div></div></div>
       <div class="card"><h2>Modell-Backend</h2>
         <dl class="kv"><dt>Adresse</dt><dd id="o-backend" class="small"></dd><dt>Status</dt><dd id="o-bstate">…</dd></dl>
@@ -742,7 +742,9 @@ const ICONS = {
   mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/>',
   flow: '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h4a2 2 0 0 1 2 2v7"/>',
   box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>' };
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>' };
 const ico = (k) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.box}</svg>`;
 const STATE_SOL = { running: "Läuft", partial: "Teilweise", stopped: "Gestoppt", available: "Verfügbar" };
 const stPill = (st) => `<span class="st-pill st-${st}"><span class="dot ${st === "running" ? "ok" : st === "partial" ? "warn" : st === "stopped" ? "bad" : ""}"></span>${STATE_SOL[st]}</span>`;
@@ -779,10 +781,10 @@ async function loadCockpit() {
 function gotoSolution(id) { switchTab("solutions"); setTimeout(() => { const el = document.querySelector(`[data-sol="${id}"]`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 300); }
 
 // ---------- Lösungen ----------
-let SOLS = null, WMODELS = [];
+let SOLS = null, WMODELS = [], IMODELS = {};
 async function loadSolutions() {
   const r = await api("/api/solutions");
-  SOLS = r.solutions; WMODELS = r.whisper_models || [];
+  SOLS = r.solutions; WMODELS = r.whisper_models || []; IMODELS = r.image_models || {};
   $("s-list").innerHTML = SOLS.map((x) => {
     const rt = x.routing;
     const routing = rt ? `<div class="opts"><span class="small muted">Erreichbar über</span>
@@ -793,6 +795,20 @@ async function loadSolutions() {
     const whisper = x.id === "whisper" ? `<div class="opts"><span class="small muted">Modell</span>
         <select data-wm="${x.id}">${[...new Set([...WMODELS, x.settings.model])].map((m) => `<option${m === x.settings.model ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
         <button class="btn small" onclick="solWhisper()">Speichern</button><span class="hint">small: schnell auf der CPU · medium: besser für Deutsch · large-v3-turbo: am besten, braucht viel RAM/CPU</span></div>` : "";
+    const st = x.settings || {};
+    const files = x.id === "files" ? `<div class="opts"><span class="small muted">Dateien löschen nach</span>
+        <input type="number" data-fk value="${st.keep_days || 7}" min="1" max="365" style="max-width:90px"><span class="small muted">Tagen</span>
+        <button class="btn small" onclick="solFiles()">Speichern</button>
+        <span class="hint">Im Chat das Werkzeug „Dateien erzeugen“ einschalten (Symbol unter dem Eingabefeld) oder im Modell fest aktivieren.</span></div>` : "";
+    const images = x.id === "images" ? `<div class="opts"><span class="small muted">Läuft auf</span>
+        <select data-im="mode"><option value="cpu"${st.mode === "cpu" ? " selected" : ""}>diesem Server (CPU)</option><option value="cuda"${st.mode === "cuda" ? " selected" : ""}>diesem Server (NVIDIA-GPU)</option><option value="external"${st.mode === "external" ? " selected" : ""}>externem Dienst (OpenAI-kompatibel)</option></select>
+        <select data-im="model" class="im-local">${Object.entries(IMODELS).map(([k, l]) => `<option value="${k}"${k === st.model ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <input type="text" data-im="url" class="im-ext" value="${esc(st.url || "")}" placeholder="http://server:1234/v1">
+        <input type="password" data-im="key" class="im-ext" placeholder="${st.key_set ? "Key gespeichert" : "API-Key (optional)"}">
+        <input type="text" data-im="ext_model" class="im-ext" value="${esc(st.ext_model || "")}" placeholder="Modellname">
+        <input type="text" data-im="size" value="${esc(st.size || "")}" placeholder="Größe, z. B. 512x512" style="max-width:150px">
+        <button class="btn small" onclick="solImages()">Speichern</button></div>
+        <p class="hint" style="margin-top:6px">Auf der CPU dauert ein Bild je nach Modell 20 Sekunden bis wenige Minuten. Das Modell (2 bis 7 GB) wird beim ersten Start einmalig geladen. Im Chat über das Bild-Symbol unter dem Eingabefeld nutzen.</p>` : "";
     const custom = x.custom ? `<button class="btn small" onclick="customEdit('${x.id}')">Bearbeiten</button><button class="btn small" onclick="customDelete('${x.id}')">Entfernen</button>` : "";
     return `<div class="card solx" data-sol="${x.id}">
       <div class="head"><div class="ico" style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--c2) 18%,transparent);color:var(--c2)">${ico(x.icon)}</div>
@@ -803,8 +819,9 @@ async function loadSolutions() {
         ${custom}
         <label class="toggle" title="${x.core ? "Kern von Formica, immer aktiv" : x.enabled ? "Deaktivieren" : "Aktivieren"}"><input type="checkbox" ${x.enabled ? "checked" : ""} ${x.core ? "disabled" : ""} onchange="solToggle('${x.id}', this.checked)"><i></i></label></div>
       ${x.enabled ? `<div class="members">${x.members.map((m) => `<span title="${esc(m.image)}"><span class="dot ${m.state === "running" ? "ok" : m.state === "aus" ? "" : "bad"}"></span>${esc(m.label)}</span>`).join("")}</div>` : ""}
-      ${routing}${whisper}</div>`;
+      ${routing}${whisper}${files}${images}</div>`;
   }).join("");
+  imVis();
 }
 async function solToggle(id, on) {
   const x = SOLS.find((s) => s.id === id);
@@ -816,6 +833,23 @@ async function solToggle(id, on) {
 async function solRouting(id) {
   const routing = { type: document.querySelector(`[data-rt="${id}"]`).value, port: Number(document.querySelector(`[data-rp="${id}"]`).value), sub: document.querySelector(`[data-rs="${id}"]`).value };
   const r = await api(`/api/solution/${id}`, { routing });
+  if (!r.ok) return alert(r.error);
+  await apply(false);
+}
+function imVis() {
+  const m = document.querySelector('[data-im="mode"]'); if (!m) return;
+  document.querySelectorAll(".im-ext").forEach((e) => e.classList.toggle("hidden", m.value !== "external"));
+  document.querySelectorAll(".im-local").forEach((e) => e.classList.toggle("hidden", m.value === "external"));
+}
+$("s-list").addEventListener("change", (ev) => { if (ev.target.dataset.im === "mode") imVis(); });
+async function solFiles() {
+  const r = await api("/api/solution/files", { settings: { keep_days: Number(document.querySelector("[data-fk]").value) } });
+  if (!r.ok) return alert(r.error);
+  await apply(false);
+}
+async function solImages() {
+  const settings = {}; document.querySelectorAll("[data-im]").forEach((e) => { settings[e.dataset.im] = e.value; });
+  const r = await api("/api/solution/images", { settings });
   if (!r.ok) return alert(r.error);
   await apply(false);
 }
