@@ -14,6 +14,10 @@ Formica (lateinisch „Ameise“) ist das Gegenstück zu [MyrmidLM](https://gith
 | **Docling** | Liest PDFs, Office-Dateien, Tabellen, Scans |
 | **Embeddings** | bge-m3 über llama.cpp (dieselbe Engine wie MyrmidLM) |
 | **Caddy** | Reverse Proxy und HTTPS |
+| SearXNG (optional) | Websuche in Open WebUI |
+| Whisper (optional) | Spracheingabe im Chat |
+| n8n (optional) | Workflows und Automatisierung |
+| Eigene Lösungen | beliebige Container, über Port oder Subdomain erreichbar |
 | **Formica** | Verwaltungsoberfläche für alles oben |
 
 ## Installation

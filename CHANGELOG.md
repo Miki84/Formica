@@ -1,5 +1,13 @@
 # Änderungen
 
+## 0.3.0
+- Neue Startseite „Cockpit“ wie im meloki AdminPACK: Lösungskarten mit Status, Updates, Monitoring (CPU, RAM, GPU, Speicher, GPU-Verlauf der letzten 5 Minuten, Ereignisse), Sicherheit, Backup, Modell-Backend, System
+- Neuer Reiter „Lösungen“: Lösungen und Verbünde aktivieren und deaktivieren, starten, stoppen, neu starten
+- Neue Lösungen: Websuche (SearXNG, direkt in Open WebUI eingebunden), Whisper (Spracheingabe, Modell wählbar), n8n
+- Eigene Lösungen: beliebiger Container mit Image, Port, Umgebungsvariablen, Volumes und optional GPU
+- Erreichbar über eigenen Port oder Subdomain, mit HTTPS je nach Betriebsart
+- Ereignisprotokoll (Anmeldungen, Änderungen, Vorgänge), im Reiter Logs durchsuchbar; Suche auch in den Logs der Dienste
+
 ## 0.2.3
 - Einstellungen → „Erweitert: eigene Umgebungsvariablen“ je Dienst (Open WebUI, Docling, Qdrant, Embeddings, PostgreSQL, Caddy), wie bei meloki
 - Markiert, wenn ein Eintrag einen Wert von Formica überschreibt; Warnung bei Variablen, die die Dienste miteinander verbinden

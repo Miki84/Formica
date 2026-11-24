@@ -58,6 +58,44 @@ def log(msg: str) -> None:
     print(time.strftime("%Y-%m-%d %H:%M:%S"), msg, flush=True)
 
 
+EVENTS_MAX = 2000
+
+
+def event(text: str, level: str = "info", source: str = "formica") -> None:
+    """A line for the event log (cockpit, Ereignisse): what happened, kept on disk."""
+    log(text)
+    try:
+        f = HOME / "events.jsonl"
+        with f.open("a") as fh:
+            fh.write(json.dumps({"t": time.time(), "level": level, "source": source, "text": text},
+                                ensure_ascii=False) + "\n")
+        if f.stat().st_size > 600_000:  # keep the newest lines
+            lines = f.read_text().splitlines()[-EVENTS_MAX:]
+            f.write_text("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def read_events(limit: int = 200, q: str = "", level: str = "") -> list[dict]:
+    f = HOME / "events.jsonl"
+    if not f.exists():
+        return []
+    out = []
+    for line in reversed(f.read_text().splitlines()):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if level and e.get("level") != level:
+            continue
+        if q and q.lower() not in (e.get("text", "") + " " + e.get("source", "")).lower():
+            continue
+        out.append(e)
+        if len(out) >= limit:
+            break
+    return out
+
+
 # --------------------------------------------------------------------------
 # Versions: tested together. Formica only moves them with a new release.
 # --------------------------------------------------------------------------
@@ -69,6 +107,9 @@ IMAGES = {
     "qdrant": "qdrant/qdrant:latest",
     "docling": "ghcr.io/docling-project/docling-serve-cpu:latest",
     "embeddings": "ghcr.io/ggml-org/llama.cpp:server",
+    "searxng": "searxng/searxng:latest",
+    "whisper": "ghcr.io/speaches-ai/speaches:latest-cpu",
+    "n8n": "docker.n8n.io/n8nio/n8n:latest",
 }
 
 MODULES = [
@@ -79,7 +120,27 @@ MODULES = [
     ("qdrant", "Qdrant", "Vektordatenbank für die Dokumente", False),
     ("embeddings", "Embeddings (bge-m3)", "Wandelt Texte und Fragen in Vektoren um", False),
     ("docling", "Docling", "Liest PDFs, Office-Dateien, Tabellen und Scans", True),
+    ("searxng", "SearXNG", "Metasuchmaschine für die Websuche in Open WebUI", True),
+    ("whisper", "Whisper (speaches)", "Spracherkennung für die Spracheingabe im Chat", True),
+    ("n8n", "n8n", "Workflows und Automatisierung", True),
 ]
+
+# Solutions (what the cockpit shows): a solution or a bundle of services.
+CATALOG = [
+    {"id": "chat", "label": "Chat & RAG", "icon": "chat", "core": True,
+     "desc": "Open WebUI mit Wissensdatenbank: Chat, Benutzer, Dokumente",
+     "services": ["open-webui", "postgres", "qdrant", "embeddings", "docling", "caddy"]},
+    {"id": "websearch", "label": "Websuche", "icon": "search",
+     "desc": "SearXNG: Open WebUI kann im Internet suchen", "services": ["searxng"]},
+    {"id": "whisper", "label": "Whisper", "icon": "mic",
+     "desc": "Spracheingabe im Chat (Speech-to-Text)", "services": ["whisper"]},
+    {"id": "n8n", "label": "n8n", "icon": "flow",
+     "desc": "Workflows und Automatisierung", "services": ["n8n"], "web": ("n8n", 5678),
+     "routing": {"type": "port", "port": 5678, "sub": "n8n"}},
+]
+CATALOG_BY_ID = {c["id"]: c for c in CATALOG}
+WHISPER_MODELS = ["Systran/faster-whisper-small", "Systran/faster-whisper-medium",
+                  "deepdml/faster-whisper-large-v3-turbo-ct2", "Systran/faster-distil-whisper-large-v3"]
 
 
 # --------------------------------------------------------------------------
@@ -125,6 +186,7 @@ DEFAULTS = {
         "follow_ups": True,
         "autocomplete": False,
     },
+    "solutions": {},          # {id: {"enabled", "routing": {"type", "port", "sub"}, "settings": {}}}
     "users": {
         "signup": True,           # users may register, the admin unlocks them
         "default_role": "pending",
@@ -173,7 +235,7 @@ def load_config() -> dict:
         cfg = _merge(DEFAULTS, raw)
         sec = cfg.setdefault("secrets", {})
         changed = False
-        for k in ("pg_password", "qdrant_key", "webui_secret"):
+        for k in ("pg_password", "qdrant_key", "webui_secret", "searxng_secret"):
             if not sec.get(k):
                 sec[k] = secrets.token_hex(24)  # hex: safe inside URLs
                 changed = True
@@ -237,6 +299,65 @@ def embedding_endpoint(cfg: dict) -> tuple[str, str, str]:
     return "http://embeddings:8080/v1", "none", "bge-m3"
 
 
+def solution_conf(cfg: dict, sid: str) -> dict:
+    """Settings of a solution, with the catalog's defaults."""
+    cat = CATALOG_BY_ID.get(sid, {})
+    raw = (cfg.get("solutions") or {}).get(sid) or {}
+    routing = dict(cat.get("routing") or {"type": "none", "port": 0, "sub": ""})
+    routing.update(raw.get("routing") or {})
+    settings = {"model": WHISPER_MODELS[0]} if sid == "whisper" else {}
+    settings.update(raw.get("settings") or {})
+    return {"enabled": bool(cat.get("core") or raw.get("enabled")), "routing": routing, "settings": settings}
+
+
+def custom_solutions(cfg: dict) -> list[dict]:
+    return [c for c in (cfg.get("custom") or []) if c.get("id")]
+
+
+def enabled_services(cfg: dict) -> list[str]:
+    out = []
+    for cat in CATALOG:
+        if not solution_conf(cfg, cat["id"])["enabled"]:
+            continue
+        for svc in cat["services"]:
+            if svc == "docling" and not cfg["rag"]["docling"]:
+                continue
+            if svc == "embeddings" and cfg["rag"]["embedding_source"] != "local":
+                continue
+            out.append(svc)
+    out += ["custom-" + c["id"] for c in custom_solutions(cfg) if c.get("enabled", True)]
+    return out
+
+
+def all_service_names(cfg: dict) -> list[str]:
+    return list(IMAGES) + ["custom-" + c["id"] for c in custom_solutions(cfg)]
+
+
+def web_routes(cfg: dict) -> list[dict]:
+    """Solutions with their own web interface, reached through Caddy."""
+    routes = []
+    for cat in CATALOG:
+        sc = solution_conf(cfg, cat["id"])
+        if cat.get("web") and sc["enabled"] and sc["routing"].get("type") in ("port", "subdomain"):
+            svc, port = cat["web"]
+            routes.append({"id": cat["id"], "label": cat["label"], "upstream": f"{svc}:{port}", **sc["routing"]})
+    for c in custom_solutions(cfg):
+        r = c.get("routing") or {}
+        if c.get("enabled", True) and c.get("port") and r.get("type") in ("port", "subdomain"):
+            routes.append({"id": c["id"], "label": c.get("label") or c["id"],
+                           "upstream": f"custom-{c['id']}:{int(c['port'])}", **r})
+    return routes
+
+
+def route_url(cfg: dict, r: dict) -> str:
+    g = cfg["general"]
+    https = g["access"] in ("internal", "acme", "proxy")
+    scheme = "https" if https else "http"
+    if r.get("type") == "subdomain":
+        return f"{scheme}://{r.get('sub')}.{g['host']}"
+    return f"{'https' if g['access'] in ('internal', 'acme') else 'http'}://{g['host']}:{int(r.get('port') or 0)}"
+
+
 def test_embeddings(cfg: dict) -> dict:
     url, key, model = embedding_endpoint(cfg)
     if cfg["rag"]["embedding_source"] == "local":
@@ -284,6 +405,24 @@ def validate(cfg: dict) -> list[str]:
         errs.append("Unbekannte Quelle für die Embeddings.")
     if r["embedding_source"] == "custom" and not r["embedding_url"]:
         errs.append("Bitte die Adresse des Embedding-Dienstes eintragen.")
+    used_ports = {int(g["http_port"]), 8095}
+    if g["access"] in ("internal", "acme"):
+        used_ports.add(int(g["https_port"]))
+    for rt in web_routes(cfg):
+        if rt["type"] == "port":
+            p = int(rt.get("port") or 0)
+            if not (1 <= p <= 65535):
+                errs.append(f"{rt['label']}: ungültiger Port {p}")
+            elif p in used_ports:
+                errs.append(f"{rt['label']}: Port {p} ist schon belegt")
+            used_ports.add(p)
+        elif not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", str(rt.get("sub") or "")):
+            errs.append(f"{rt['label']}: ungültige Subdomain „{rt.get('sub')}“")
+        elif re.match(r"^\d+\.\d+\.\d+\.\d+$", g["host"] or ""):
+            errs.append(f"{rt['label']}: Subdomains brauchen einen DNS-Namen als Hostname, keine IP-Adresse")
+    for c in custom_solutions(cfg):
+        if not re.match(r"^[a-z0-9][a-z0-9_.\-/:@]*$", c.get("image", "")):
+            errs.append(f"Eigene Lösung {c['id']}: ungültiges Image")
     if r["ocr"] not in ("auto", "force", "off"):
         errs.append("Unbekannte OCR-Einstellung.")
     if not (1 <= int(r["top_k"]) <= 50):
@@ -359,6 +498,16 @@ def render_caddyfile(cfg: dict) -> str:
         site = f"{g['host']} {{\n\ttls internal\n\t{upstream}\n}}\n"
     else:
         site = f"{g['host']} {{\n\t{upstream}\n}}\n"
+    for rt in web_routes(cfg):
+        up = f"reverse_proxy {rt['upstream']}"
+        if rt["type"] == "port":
+            p = int(rt["port"])
+            addr = f":{p}" if g["access"] in ("http", "proxy") else f"{g['host']}:{p}"
+        else:
+            name = f"{rt['sub']}.{g['host']}"
+            addr = f"http://{name}" if g["access"] in ("http", "proxy") else name
+        tls = "\ttls internal\n" if g["access"] == "internal" else ""
+        site += f"\n# {rt['label']}\n{addr} {{\n{tls}\t{up}\n}}\n"
     return "# Erzeugt von Formica. Änderungen bitte in der Formica-Oberfläche.\n" + head + site
 
 
@@ -370,6 +519,11 @@ def render_compose(cfg: dict) -> dict:
     caddy_ports = [f"{int(g['http_port'])}:80"]
     if https:
         caddy_ports.append(f"{int(g['https_port'])}:443")
+    for rt in web_routes(cfg):
+        if rt["type"] == "port":
+            if f"{int(rt['port'])}:{int(rt['port'])}" not in caddy_ports:
+                caddy_ports.append(f"{int(rt['port'])}:{int(rt['port'])}")
+    active = enabled_services(cfg)
 
     webui_env = {
         "WEBUI_NAME": g["name"],
@@ -413,6 +567,14 @@ def render_compose(cfg: dict) -> dict:
     }
     if c["task_model"]:
         webui_env["TASK_MODEL_EXTERNAL"] = c["task_model"]
+    if "searxng" in active:
+        webui_env.update({"ENABLE_WEB_SEARCH": "true", "WEB_SEARCH_ENGINE": "searxng",
+                          "SEARXNG_QUERY_URL": "http://searxng:8080/search?q=<query>",
+                          "WEB_SEARCH_RESULT_COUNT": "5"})
+    if "whisper" in active:
+        webui_env.update({"AUDIO_STT_ENGINE": "openai", "AUDIO_STT_OPENAI_API_BASE_URL": "http://whisper:8000/v1",
+                          "AUDIO_STT_OPENAI_API_KEY": "none",
+                          "AUDIO_STT_MODEL": solution_conf(cfg, "whisper")["settings"]["model"]})
     if r["docling"]:
         webui_env["CONTENT_EXTRACTION_ENGINE"] = "docling"
         webui_env["DOCLING_SERVER_URL"] = "http://docling:5001"
@@ -488,6 +650,54 @@ def render_compose(cfg: dict) -> dict:
             "networks": ["formica"],
         }
 
+    if "searxng" in active:
+        services["searxng"] = {
+            "image": IMAGES["searxng"], "restart": "unless-stopped",
+            "volumes": ["./searxng/settings.yml:/etc/searxng/settings.yml:ro"],
+            "networks": ["formica"],
+        }
+    if "whisper" in active:
+        model = solution_conf(cfg, "whisper")["settings"]["model"]
+        services["whisper"] = {
+            "image": IMAGES["whisper"], "restart": "unless-stopped",
+            "environment": {"PRELOAD_MODELS": json.dumps([model]), "WHISPER__COMPUTE_TYPE": "int8",
+                            "STT_MODEL_TTL": "-1"},
+            "volumes": ["whisper_models:/home/ubuntu/.cache/huggingface/hub"],
+            "networks": ["formica"],
+        }
+    if "n8n" in active:
+        rt = next((x for x in web_routes(cfg) if x["id"] == "n8n"), None)
+        url = route_url(cfg, rt) if rt else ""
+        n8n_env = {"GENERIC_TIMEZONE": "Europe/Berlin", "TZ": "Europe/Berlin", "N8N_PORT": "5678",
+                   "N8N_DIAGNOSTICS_ENABLED": "false", "N8N_PERSONALIZATION_ENABLED": "false",
+                   "N8N_SECURE_COOKIE": "true" if url.startswith("https") else "false"}
+        if url:
+            u = urllib.parse.urlparse(url)
+            n8n_env.update({"N8N_HOST": u.hostname or "", "N8N_PROTOCOL": u.scheme,
+                            "WEBHOOK_URL": url.rstrip("/") + "/", "N8N_EDITOR_BASE_URL": url.rstrip("/") + "/"})
+        services["n8n"] = {
+            "image": IMAGES["n8n"], "restart": "unless-stopped", "environment": n8n_env,
+            "volumes": ["n8n_data:/home/node/.n8n"], "networks": ["formica"],
+        }
+    custom_vols = []
+    for cs in custom_solutions(cfg):
+        if not cs.get("enabled", True):
+            continue
+        vols = []
+        for v in cs.get("volumes") or []:
+            vname = f"custom_{cs['id']}_{v['name']}"
+            custom_vols.append(vname)
+            vols.append(f"{vname}:{v['path']}")
+        svc = {"image": cs["image"], "restart": "unless-stopped", "networks": ["formica"]}
+        if cs.get("env"):
+            svc["environment"] = dict(cs["env"])
+        if vols:
+            svc["volumes"] = vols
+        if cs.get("gpu"):
+            svc["deploy"] = {"resources": {"reservations": {"devices": [
+                {"driver": "nvidia", "count": "all", "capabilities": ["gpu"]}]}}}
+        services["custom-" + cs["id"]] = svc
+
     for name, extra in (cfg.get("extra_env") or {}).items():
         if name in services and extra:
             services[name].setdefault("environment", {}).update(extra)
@@ -496,7 +706,8 @@ def render_compose(cfg: dict) -> dict:
         "name": PROJECT,
         "services": services,
         "volumes": {v: {} for v in ("caddy_data", "caddy_config", "openwebui_data", "postgres_data",
-                                    "qdrant_data", "embeddings_models")},
+                                    "qdrant_data", "embeddings_models", "whisper_models", "n8n_data",
+                                    *custom_vols)},
         "networks": {"formica": {}},
     }
 
@@ -551,6 +762,12 @@ def render(cfg: dict) -> None:
     compose.write_text(head + to_yaml(render_compose(cfg)) + "\n")
     os.chmod(compose, 0o600)  # holds the database passwords
     (STACK / "caddy" / "Caddyfile").write_text(render_caddyfile(cfg))
+    (STACK / "searxng").mkdir(parents=True, exist_ok=True)
+    (STACK / "searxng" / "settings.yml").write_text(
+        "# Erzeugt von Formica\nuse_default_settings: true\n"
+        f"server:\n  secret_key: \"{cfg['secrets']['searxng_secret']}\"\n  limiter: false\n  image_proxy: false\n"
+        "search:\n  safe_search: 0\n  formats:\n    - html\n    - json\n"
+        "ui:\n  default_locale: de\n")
 
 
 # --------------------------------------------------------------------------
@@ -588,6 +805,7 @@ class Job:
                 return False
             self.name, self.running, self.ok, self.lines, self.started = name, True, None, [], time.time()
             self.on_ok = on_ok
+        event(f"{name} gestartet")
         threading.Thread(target=self._run, args=(steps,), daemon=True).start()
         return True
 
@@ -610,6 +828,7 @@ class Job:
                 ok = False
                 self.lines.append("docker ist nicht erreichbar.")
                 break
+        event(f"{self.name}: {'erfolgreich' if ok else 'fehlgeschlagen'}", "info" if ok else "error")
         if ok and self.on_ok:
             try:
                 self.on_ok()
@@ -665,16 +884,96 @@ def services_status() -> list[dict]:
                     "image": it.get("Image", ""),
                 }
     cfg = load_config()
+    active = set(enabled_services(cfg))
+    rows = [(n, l, d, o, IMAGES[n]) for n, l, d, o in MODULES]
+    rows += [("custom-" + c["id"], c.get("label") or c["id"], c.get("desc") or "Eigene Lösung", True, c["image"])
+             for c in custom_solutions(cfg)]
     out = []
-    for name, label, desc, optional in MODULES:
-        enabled = not ((name == "docling" and not cfg["rag"]["docling"])
-                       or (name == "embeddings" and cfg["rag"]["embedding_source"] != "local"))
+    for name, label, desc, optional, image in rows:
+        enabled = name in active
         st = state.get(name, {})
+        if not enabled and not st:
+            continue  # not part of this installation
         out.append({"name": name, "label": label, "desc": desc, "optional": optional,
                     "enabled": enabled, "state": st.get("state", "fehlt" if enabled else "aus"),
-                    "status": st.get("status", ""), "health": st.get("health", ""),
-                    "image": IMAGES[name]})
+                    "status": st.get("status", ""), "health": st.get("health", ""), "image": image})
     return out
+
+
+def solutions_status(cfg: dict) -> list[dict]:
+    svc = {s["name"]: s for s in services_status()}
+    out = []
+
+    def overall(names, enabled):
+        if not enabled:
+            return "available"
+        states = [svc.get(n, {}).get("state", "fehlt") for n in names]
+        if states and all(x == "running" for x in states):
+            return "running"
+        if any(x == "running" for x in states):
+            return "partial"
+        return "stopped"
+    for cat in CATALOG:
+        sc = solution_conf(cfg, cat["id"])
+        members = [n for n in cat["services"] if n in enabled_services(cfg)] if sc["enabled"] else cat["services"]
+        rt = next((r for r in web_routes(cfg) if r["id"] == cat["id"]), None)
+        out.append({"id": cat["id"], "label": cat["label"], "desc": cat["desc"], "icon": cat["icon"],
+                    "core": bool(cat.get("core")), "custom": False, "enabled": sc["enabled"],
+                    "routing": sc["routing"] if cat.get("web") else None, "settings": sc["settings"],
+                    "url": webui_url(cfg) if cat["id"] == "chat" else (route_url(cfg, rt) if rt else None),
+                    "state": overall(members, sc["enabled"]),
+                    "members": [{"name": n, "label": next((m[1] for m in MODULES if m[0] == n), n),
+                                 "state": svc.get(n, {}).get("state", "aus"), "image": IMAGES.get(n, "")}
+                                for n in members]})
+    for c in custom_solutions(cfg):
+        name = "custom-" + c["id"]
+        rt = next((r for r in web_routes(cfg) if r["id"] == c["id"]), None)
+        out.append({"id": c["id"], "label": c.get("label") or c["id"], "desc": c.get("desc") or c["image"],
+                    "icon": "box", "core": False, "custom": True, "enabled": c.get("enabled", True),
+                    "routing": c.get("routing"), "settings": {}, "url": route_url(cfg, rt) if rt else None,
+                    "state": overall([name], c.get("enabled", True)), "spec": c,
+                    "members": [{"name": name, "label": c.get("label") or c["id"],
+                                 "state": svc.get(name, {}).get("state", "aus"), "image": c["image"]}]})
+    return out
+
+
+def parse_custom(data: dict, existing: list[dict]) -> tuple[dict | None, str]:
+    """A custom solution from the form."""
+    label = str(data.get("label") or "").strip()
+    cid = str(data.get("id") or "").strip() or re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    if not re.match(r"^[a-z0-9][a-z0-9-]{0,30}$", cid):
+        return None, "Name: bitte Buchstaben und Ziffern verwenden (wird zur ID)."
+    if cid in CATALOG_BY_ID or cid in ("formica", "control"):
+        return None, f"„{cid}“ ist schon vergeben."
+    image = str(data.get("image") or "").strip()
+    if not re.match(r"^[a-z0-9][a-z0-9_.\-/:@]*$", image):
+        return None, "Image: z. B. nginx:alpine oder ghcr.io/user/app:1.2"
+    port = int(data.get("port") or 0)
+    if port and not (1 <= port <= 65535):
+        return None, "Interner Port zwischen 1 und 65535."
+    env, _errs = clean_extra_env({"open-webui": [
+        {"key": ln.split("=", 1)[0].strip(), "value": ln.split("=", 1)[1] if "=" in ln else ""}
+        for ln in str(data.get("env") or "").splitlines() if ln.strip() and not ln.strip().startswith("#")]})
+    if _errs:
+        return None, "Umgebungsvariablen: " + "; ".join(e.split(": ", 1)[-1] for e in _errs)
+    vols = []
+    for ln in str(data.get("volumes") or "").splitlines():
+        if not ln.strip():
+            continue
+        name, _, path = ln.partition(":")
+        name, path = name.strip(), path.strip()
+        if not re.match(r"^[a-z0-9][a-z0-9_-]*$", name) or not path.startswith("/"):
+            return None, f"Volume „{ln.strip()}“: Format name:/pfad/im/container"
+        vols.append({"name": name, "path": path})
+    rt = data.get("routing") or {}
+    routing = {"type": rt.get("type") if rt.get("type") in ("none", "port", "subdomain") else "none",
+               "port": int(rt.get("port") or 0), "sub": str(rt.get("sub") or cid).strip()}
+    if routing["type"] != "none" and not port:
+        return None, "Für den Zugriff im Browser bitte den internen Port der Anwendung angeben."
+    old = next((c for c in existing if c["id"] == cid), {})
+    return {"id": cid, "label": label or cid, "desc": str(data.get("desc") or "").strip(), "image": image,
+            "port": port, "env": env.get("open-webui", {}), "volumes": vols, "routing": routing,
+            "gpu": bool(data.get("gpu")), "enabled": old.get("enabled", True)}, ""
 
 
 def caddy_root_cert() -> str | None:
@@ -803,6 +1102,8 @@ class Monitor:
         self.hist = {k: [] for k in ("cpu", "ram", "disk_r", "disk_w", "net_rx", "net_tx", "temp")}
         self.containers: list[dict] = []
         self.cluster: dict = {}
+        self.gpu = None
+        self.gpu_hist: list = []
         self.viewed = 0.0
         threading.Thread(target=self._loop, daemon=True).start()
         threading.Thread(target=self._slow_loop, daemon=True).start()
@@ -866,16 +1167,26 @@ class Monitor:
             prev, t0, d0, n0 = cur, t1, d1, n1
 
     def _slow_loop(self):
+        last_cluster = 0.0
         while True:
-            if time.time() - self.viewed < 30:
+            watching = time.time() - self.viewed < 30
+            if watching:
                 try:
                     self._docker_stats()
                 except Exception as e:  # noqa: BLE001
                     log(f"Monitor: docker stats: {e}")
+            # the cluster always (the cockpit shows its GPU history), more often while watched
+            if watching or time.time() - last_cluster >= 10:
+                last_cluster = time.time()
                 try:
                     self._cluster()
                 except Exception as e:  # noqa: BLE001
                     self.cluster = {"error": str(e)[:200]}
+                gpus = [g for h in self.cluster.get("hosts", []) for g in (h.get("stats") or {}).get("gpus") or []]
+                util = [g.get("util_pct") for g in gpus if g.get("util_pct") is not None]
+                self.gpu = round(sum(util) / len(util), 1) if util else None
+                self.gpu_hist.append({"t": time.time(), "v": self.gpu})
+                self.gpu_hist = [x for x in self.gpu_hist if time.time() - x["t"] <= 300]
             time.sleep(3)
 
     def _docker_stats(self):
@@ -930,11 +1241,13 @@ class Monitor:
         self.cluster = {"url": url, "hosts": hosts, "requests": (mon.get("requests") or [])[:200],
                         "totals": mon.get("totals") or {}, "time": time.time()}
 
-    def snapshot(self) -> dict:
-        self.viewed = time.time()
+    def snapshot(self, light: bool = False) -> dict:
+        if not light:
+            self.viewed = time.time()
         with self.lock:
             return {"host": dict(self.host), "hist": {k: list(v) for k, v in self.hist.items()},
-                    "containers": self.containers, "cluster": self.cluster}
+                    "containers": self.containers, "cluster": self.cluster,
+                    "gpu": self.gpu, "gpu_hist": list(self.gpu_hist)}
 
 
 MON = None
@@ -1071,6 +1384,9 @@ def check_password(cfg: dict, pw: str) -> bool:
     return hmac.compare_digest(test["hash"], a["hash"])
 
 
+ACTION_DE = {"start": "gestartet", "stop": "gestoppt", "restart": "neu gestartet"}
+
+
 def setup_token() -> str:
     if not TOKEN_FILE.exists():
         HOME.mkdir(parents=True, exist_ok=True)
@@ -1182,6 +1498,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"services": services_status(), "job": JOB.state()})
         if path == "/api/job":
             return self._json(200, JOB.state())
+        if path == "/api/solutions":
+            cfg = load_config()
+            return self._json(200, {"solutions": solutions_status(cfg), "whisper_models": WHISPER_MODELS,
+                                    "job": JOB.state()})
+        if path == "/api/events":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self._json(200, {"events": read_events(int(q.get("limit", ["200"])[0]), q.get("q", [""])[0],
+                                                          q.get("level", [""])[0])})
+        if path == "/api/cockpit":
+            cfg = load_config()
+            snap = MON.snapshot(light=True) if MON else {}
+            return self._json(200, {"solutions": solutions_status(cfg), "events": read_events(8),
+                                    "host": snap.get("host", {}), "gpu_hist": snap.get("gpu_hist", []),
+                                    "gpu": snap.get("gpu"), "update": check_update(),
+                                    "security": {"password": bool(cfg.get("admin")), "totp": bool((cfg.get("admin") or {}).get("totp")),
+                                                 "access": cfg["general"]["access"], "url": webui_url(cfg)},
+                                    "job": JOB.state(), "applied": cfg.get("applied")})
         if path == "/api/monitor":
             return self._json(200, MON.snapshot() if MON else {})
         if path == "/api/system":
@@ -1194,7 +1527,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"log": f.read_text()[-20000:] if f.exists() else ""})
         if path.startswith("/api/logs/"):
             name = path.rsplit("/", 1)[-1]
-            if name not in IMAGES:
+            if name not in all_service_names(load_config()):
                 return self._json(404, {"error": "Unbekannter Dienst"})
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             lines = max(10, min(int(q.get("lines", ["300"])[0]), 5000))
@@ -1241,7 +1574,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg["admin"] = hash_password(pw)
             save_config(cfg)
             TOKEN_FILE.unlink(missing_ok=True)
-            log("Einrichtung: Admin-Passwort gesetzt")
+            event("Einrichtung abgeschlossen: Admin-Passwort gesetzt")
             return self._json(200, {"ok": True}, self._new_session())
 
         if path == "/api/login":
@@ -1249,8 +1582,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(429, {"error": "Zu viele Versuche. Bitte 5 Minuten warten."})
             if check_password(load_config(), str(data.get("password", ""))):
                 FAILED.pop(ip, None)
+                event(f"Anmeldung von {ip}", source="sicherheit")
                 return self._json(200, {"ok": True}, self._new_session())
             FAILED.setdefault(ip, []).append(time.time())
+            event(f"Fehlgeschlagene Anmeldung von {ip}", "warn", "sicherheit")
             return self._json(403, {"error": "Passwort falsch."})
 
         tok = self._session()
@@ -1269,6 +1604,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg["admin"] = hash_password(str(data["new"]))
             save_config(cfg)
             SESSIONS.clear()
+            event("Admin-Passwort geändert", source="sicherheit")
             return self._json(200, {"ok": True}, self._new_session())
         if path == "/api/config":
             cfg = load_config()
@@ -1283,6 +1619,7 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["extra_env"] = extra
             errs = validate(cfg)
             save_config(cfg)
+            event("Einstellungen gespeichert")
             return self._json(200, {"ok": not errs, "errors": errs, "config": public_config(cfg),
                                     "webui_url": webui_url(cfg), "managed_env": managed_env(cfg),
                                     "critical_env": sorted(CRITICAL_ENV)})
@@ -1301,7 +1638,7 @@ class Handler(BaseHTTPRequestHandler):
             if JOB.running:
                 return self._json(409, {"error": "Es läuft gerade ein anderer Vorgang."})
             ok, out = self_update()
-            log("Selbst-Update gestartet" if ok else f"Selbst-Update fehlgeschlagen: {out}")
+            event("Formica-Update gestartet" if ok else f"Formica-Update fehlgeschlagen: {out}", "info" if ok else "error")
             return self._json(200 if ok else 500, {"ok": ok, "error": None if ok else out})
         if path in ("/api/apply", "/api/update"):
             cfg = load_config()
@@ -1311,12 +1648,81 @@ class Handler(BaseHTTPRequestHandler):
             if not apply_stack(pull=(path == "/api/update")):
                 return self._json(409, {"error": "Es läuft bereits ein Vorgang."})
             return self._json(200, {"ok": True})
-        m = re.match(r"^/api/service/([a-z\-]+)/(start|stop|restart)$", path)
+        m = re.match(r"^/api/solution/([a-z0-9\-]+)/(start|stop|restart)$", path)
+        if m:
+            sid, action = m.groups()
+            cfg = load_config()
+            sol = next((x for x in solutions_status(cfg) if x["id"] == sid), None)
+            if not sol or not sol["enabled"]:
+                return self._json(404, {"error": "Lösung nicht aktiv"})
+            names = [x["name"] for x in sol["members"] if not (sid == "chat" and x["name"] == "caddy" and action == "stop")]
+            code, out = run(compose_cmd(action, *names), timeout=180)
+            event(f"Lösung {sol['label']}: {ACTION_DE[action]}" + ("" if code == 0 else " fehlgeschlagen"),
+                  "info" if code == 0 else "error")
+            return self._json(200 if code == 0 else 500, {"ok": code == 0, "output": out})
+        m = re.match(r"^/api/solution/([a-z0-9\-]+)$", path)
+        if m:
+            sid = m.group(1)
+            cfg = load_config()
+            if sid in CATALOG_BY_ID:
+                cat = CATALOG_BY_ID[sid]
+                cur = dict((cfg.get("solutions") or {}).get(sid) or {})
+                if "enabled" in data and not cat.get("core"):
+                    cur["enabled"] = bool(data["enabled"])
+                if isinstance(data.get("routing"), dict) and cat.get("web"):
+                    r = data["routing"]
+                    cur["routing"] = {"type": r.get("type") if r.get("type") in ("port", "subdomain", "none") else "port",
+                                      "port": int(r.get("port") or 0), "sub": str(r.get("sub") or "").strip()}
+                if isinstance(data.get("settings"), dict):
+                    st = dict(cur.get("settings") or {})
+                    if sid == "whisper" and data["settings"].get("model"):
+                        st["model"] = str(data["settings"]["model"]).strip()
+                    cur["settings"] = st
+                cfg.setdefault("solutions", {})[sid] = cur
+                label = cat["label"]
+            else:
+                cs = next((c for c in custom_solutions(cfg) if c["id"] == sid), None)
+                if not cs:
+                    return self._json(404, {"error": "Unbekannte Lösung"})
+                if "enabled" in data:
+                    cs["enabled"] = bool(data["enabled"])
+                label = cs.get("label") or sid
+            errs = validate(cfg)
+            route_errs = [e for e in errs if e.startswith(label + ":")]
+            if route_errs:
+                return self._json(400, {"error": "; ".join(route_errs)})
+            save_config(cfg)
+            if "enabled" in data:
+                event(f"Lösung {label} {'aktiviert' if data['enabled'] else 'deaktiviert'}")
+            return self._json(200, {"ok": True, "solutions": solutions_status(cfg)})
+        if path == "/api/custom":
+            cfg = load_config()
+            spec, err = parse_custom(data, custom_solutions(cfg))
+            if err:
+                return self._json(400, {"error": err})
+            lst = [c for c in custom_solutions(cfg) if c["id"] != spec["id"]] + [spec]
+            cfg["custom"] = lst
+            errs = [e for e in validate(cfg) if e.startswith(spec["label"] + ":") or spec["id"] in e]
+            if errs:
+                return self._json(400, {"error": "; ".join(errs)})
+            save_config(cfg)
+            event(f"Eigene Lösung {spec['label']} gespeichert ({spec['image']})")
+            return self._json(200, {"ok": True, "solutions": solutions_status(cfg)})
+        m = re.match(r"^/api/custom/([a-z0-9\-]+)/delete$", path)
+        if m:
+            cfg = load_config()
+            cfg["custom"] = [c for c in custom_solutions(cfg) if c["id"] != m.group(1)]
+            save_config(cfg)
+            event(f"Eigene Lösung {m.group(1)} entfernt (Daten-Volumes bleiben erhalten)")
+            return self._json(200, {"ok": True, "solutions": solutions_status(cfg)})
+        m = re.match(r"^/api/service/([a-z0-9\-]+)/(start|stop|restart)$", path)
         if m:
             name, action = m.groups()
-            if name not in IMAGES:
+            if name not in all_service_names(load_config()):
                 return self._json(404, {"error": "Unbekannter Dienst"})
             code, out = run(compose_cmd(action, name), timeout=120)
+            event(f"Dienst {name}: {ACTION_DE[action]}" + ("" if code == 0 else " fehlgeschlagen"),
+                  "info" if code == 0 else "error")
             return self._json(200 if code == 0 else 500, {"ok": code == 0, "output": out})
         return self._json(404, {"error": "Nicht gefunden"})
 
@@ -1338,7 +1744,7 @@ def serve() -> None:
         log(f"Einrichtung offen. Einrichtungscode: {setup_token()}")
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     srv.daemon_threads = True
-    log(f"Formica {version()} auf Port {PORT}, Daten in {HOME}")
+    event(f"Formica {version()} gestartet")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
