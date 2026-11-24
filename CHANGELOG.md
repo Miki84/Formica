@@ -1,5 +1,11 @@
 # Änderungen
 
+## 0.4.2
+- Bilder über MyrmidLM (ab 2.16.0) mit beiden Engines: stable-diffusion.cpp oder ComfyUI auf dem MyrmidLM-Host, Modelle wie Z-Image Turbo, FLUX.1 schnell und Qwen-Image
+- Neue Wahl „ComfyUI mit Workflow“: Open WebUI nutzt seine ComfyUI-Anbindung über den Master (`/comfy`), mit dem Standard-Workflow des Modells von MyrmidLM oder einem eigenen Workflow samt Knoten-Zuordnung
+- Beim Speichern fragt Formica MyrmidLM nach Modell, Engine und Standardgröße und zeigt sie an
+- Neue Installationen nutzen für Bilder standardmäßig das Modell-Backend
+
 ## 0.4.1
 - Bilder erzeugen „über das Modell-Backend (MyrmidLM)“: das Bildmodell läuft auf einem MyrmidLM-Host (CPU oder eigene GPU, ab MyrmidLM 2.15.0), Open WebUI nutzt `/v1/images/generations` des Masters mit dessen Key. Formica startet dann keinen eigenen Bild-Container.
 

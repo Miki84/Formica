@@ -329,7 +329,8 @@ def solution_conf(cfg: dict, sid: str) -> dict:
     routing.update(raw.get("routing") or {})
     settings = {"whisper": {"model": WHISPER_MODELS[0]},
                 "files": {"keep_days": 7},
-                "images": {"mode": "cpu", "model": "sd15", "size": "", "url": "", "key": "", "ext_model": ""},
+                "images": {"mode": "backend", "api": "openai", "model": "sd15", "size": "", "url": "", "key": "",
+                           "ext_model": "", "workflow": "", "nodes": "", "backend_info": {}},
                 }.get(sid, {})
     settings.update(raw.get("settings") or {})
     return {"enabled": bool(cat.get("core") or raw.get("enabled")), "routing": routing, "settings": settings}
@@ -383,6 +384,29 @@ def route_url(cfg: dict, r: dict) -> str:
     if r.get("type") == "subdomain":
         return f"{scheme}://{r.get('sub')}.{g['host']}"
     return f"{'https' if g['access'] in ('internal', 'acme') else 'http'}://{g['host']}:{int(r.get('port') or 0)}"
+
+
+def backend_image_info(cfg: dict) -> dict:
+    """What the model backend (MyrmidLM 2.16+) runs for pictures: model, engine,
+    size and its ComfyUI workflow with Open WebUI's node mapping."""
+    url, key = cfg["backend"]["url"], cfg["backend"]["key"] or "none"
+    if not url:
+        return {"error": "Kein Modell-Backend eingetragen (Einstellungen)."}
+    req = urllib.request.Request(url.rstrip("/") + "/images/workflow", headers={"Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            d = json.loads(resp.read())
+        return {k: d.get(k) for k in ("model", "label", "engine", "size", "workflow", "nodes")}
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read()).get("error", {}).get("message") or f"HTTP {e.code}"
+        except Exception:  # noqa: BLE001
+            msg = f"HTTP {e.code}"
+        if e.code == 404:
+            msg = "Das Modell-Backend kennt /v1/images/workflow nicht (MyrmidLM ab 2.16.0 nötig)."
+        return {"error": msg}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Modell-Backend nicht erreichbar: {e}"}
 
 
 def test_embeddings(cfg: dict) -> dict:
@@ -611,16 +635,29 @@ def render_compose(cfg: dict) -> dict:
     if im["enabled"]:
         ims = im["settings"]
         preset = IMAGE_MODELS.get(ims.get("model"), IMAGE_MODELS["sd15"])
-        if ims.get("mode") == "backend":  # MyrmidLM: a host's image model behind the master's /v1/images/...
-            base, key, model = cfg["backend"]["url"], cfg["backend"]["key"] or "none", ims.get("model") or "sd15"
+        info = ims.get("backend_info") or {}
+        size = ims.get("size") or preset["size"]
+        if ims.get("mode") == "backend":  # MyrmidLM: a host's image model behind the master
+            base, key = cfg["backend"]["url"], cfg["backend"]["key"] or "none"
+            model, size = info.get("model") or "myrmid", ims.get("size") or info.get("size") or "1024x1024"
+            workflow = ims.get("workflow") or (json.dumps(info["workflow"]) if info.get("workflow") else "")
+            nodes = ims.get("nodes") or (json.dumps(info["nodes"]) if info.get("nodes") else "")
+            if ims.get("api") == "comfyui" and workflow and nodes:  # Open WebUI's own ComfyUI engine, via /comfy
+                webui_env.update({"ENABLE_IMAGE_GENERATION": "true", "IMAGE_GENERATION_ENGINE": "comfyui",
+                                  "COMFYUI_BASE_URL": re.sub(r"/v1$", "", base.rstrip("/")) + "/comfy",
+                                  "COMFYUI_API_KEY": key, "COMFYUI_WORKFLOW": workflow,
+                                  "COMFYUI_WORKFLOW_NODES": nodes, "IMAGE_GENERATION_MODEL": model,
+                                  "IMAGE_SIZE": size, "ENABLE_IMAGE_PROMPT_GENERATION": "false"})
+                base = ""
         elif ims.get("mode") == "external":
             base, key, model = normalize_backend_url(ims.get("url", "")), ims.get("key") or "none", ims.get("ext_model") or "dall-e-3"
         else:
             base, key, model = "http://images:1234/v1", "none", ims.get("model") or "sd15"
-        webui_env.update({"ENABLE_IMAGE_GENERATION": "true", "IMAGE_GENERATION_ENGINE": "openai",
-                          "IMAGES_OPENAI_API_BASE_URL": base, "IMAGES_OPENAI_API_KEY": key,
-                          "IMAGE_GENERATION_MODEL": model, "IMAGE_SIZE": ims.get("size") or preset["size"],
-                          "ENABLE_IMAGE_PROMPT_GENERATION": "false"})
+        if base:
+            webui_env.update({"ENABLE_IMAGE_GENERATION": "true", "IMAGE_GENERATION_ENGINE": "openai",
+                              "IMAGES_OPENAI_API_BASE_URL": base, "IMAGES_OPENAI_API_KEY": key,
+                              "IMAGE_GENERATION_MODEL": model, "IMAGE_SIZE": size,
+                              "ENABLE_IMAGE_PROMPT_GENERATION": "false"})
     if "whisper" in active:
         webui_env.update({"AUDIO_STT_ENGINE": "openai", "AUDIO_STT_OPENAI_API_BASE_URL": "http://whisper:8000/v1",
                           "AUDIO_STT_OPENAI_API_KEY": "none",
@@ -1793,6 +1830,33 @@ class Handler(BaseHTTPRequestHandler):
                                 st[k] = str(ds[k]).strip()
                         if ds.get("key"):
                             st["key"] = str(ds["key"]).strip()
+                        if ds.get("api") in ("openai", "comfyui"):
+                            st["api"] = ds["api"]
+                        for k in ("workflow", "nodes"):
+                            if k in ds:
+                                v = str(ds[k]).strip()
+                                if v:
+                                    try:
+                                        parsed = json.loads(v)
+                                    except ValueError as e:
+                                        return self._json(400, {"error": f"{'Workflow' if k == 'workflow' else 'Knoten'}: kein gültiges JSON ({e})"})
+                                    if k == "nodes" and not isinstance(parsed, list):
+                                        return self._json(400, {"error": "Knoten: eine Liste wie [{\"type\": \"prompt\", \"key\": \"text\", \"node_ids\": [\"6\"]}]"})
+                                    v = json.dumps(parsed)
+                                st[k] = v
+                        if st.get("mode") == "backend":
+                            info = backend_image_info(cfg)
+                            if info.get("error"):
+                                if st.get("api") == "comfyui" and not (st.get("workflow") and st.get("nodes")):
+                                    return self._json(400, {"error": info["error"]})
+                                event(f"Bilder: {info['error']}", "warn")
+                            else:
+                                st["backend_info"] = info
+                                if st.get("api") == "comfyui" and info.get("engine") != "comfyui" \
+                                        and not (st.get("workflow") and st.get("nodes")):
+                                    return self._json(400, {"error": "Auf MyrmidLM läuft stable-diffusion.cpp, nicht "
+                                                                     "ComfyUI: dort die Engine ComfyUI wählen oder hier "
+                                                                     "die OpenAI-Schnittstelle nutzen."})
                         if st.get("size") and not re.match(r"^\d{3,4}x\d{3,4}$", st["size"]):
                             return self._json(400, {"error": "Bildgröße im Format 512x512"})
                         if st.get("mode") == "external" and not st.get("url"):

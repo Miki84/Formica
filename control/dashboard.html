@@ -802,13 +802,22 @@ async function loadSolutions() {
         <span class="hint">Im Chat das Werkzeug „Dateien erzeugen“ einschalten (Symbol unter dem Eingabefeld) oder im Modell fest aktivieren.</span></div>` : "";
     const images = x.id === "images" ? `<div class="opts"><span class="small muted">Läuft auf</span>
         <select data-im="mode"><option value="backend"${st.mode === "backend" ? " selected" : ""}>dem Modell-Backend (MyrmidLM)</option><option value="cpu"${st.mode === "cpu" ? " selected" : ""}>diesem Server (CPU)</option><option value="cuda"${st.mode === "cuda" ? " selected" : ""}>diesem Server (NVIDIA-GPU)</option><option value="external"${st.mode === "external" ? " selected" : ""}>externem Dienst (OpenAI-kompatibel)</option></select>
-        <select data-im="model" class="im-local" title="Bei MyrmidLM entscheidet das dort gewählte Modell, dieser Wert setzt nur die Standardgröße.">${Object.entries(IMODELS).map(([k, l]) => `<option value="${k}"${k === st.model ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <select data-im="api" class="im-backend" title="OpenAI: einfach, geht mit beiden Engines von MyrmidLM. ComfyUI: Open WebUI schickt einen ComfyUI-Workflow (eigene Workflows möglich).">
+          <option value="openai"${st.api !== "comfyui" ? " selected" : ""}>OpenAI-Schnittstelle (Standard)</option>
+          <option value="comfyui"${st.api === "comfyui" ? " selected" : ""}>ComfyUI mit Workflow</option></select>
+        <select data-im="model" class="im-local">${Object.entries(IMODELS).map(([k, l]) => `<option value="${k}"${k === st.model ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
         <input type="text" data-im="url" class="im-ext" value="${esc(st.url || "")}" placeholder="http://server:1234/v1">
         <input type="password" data-im="key" class="im-ext" placeholder="${st.key_set ? "Key gespeichert" : "API-Key (optional)"}">
         <input type="text" data-im="ext_model" class="im-ext" value="${esc(st.ext_model || "")}" placeholder="Modellname">
         <input type="text" data-im="size" value="${esc(st.size || "")}" placeholder="Größe, z. B. 512x512" style="max-width:150px">
         <button class="btn small" onclick="solImages()">Speichern</button></div>
-        <p class="hint" style="margin-top:6px">Auf der CPU dauert ein Bild je nach Modell 20 Sekunden bis wenige Minuten. Das Modell (2 bis 7 GB) wird beim ersten Start einmalig geladen. Im Chat über das Bild-Symbol unter dem Eingabefeld nutzen.<br>Mit „dem Modell-Backend (MyrmidLM)“ läuft das Bildmodell auf einem MyrmidLM-Host: dort im Dashboard auf der Karte des Hosts unter „Bilder“ das Modell und CPU oder GPU wählen (ab MyrmidLM 2.15.0). Formica startet dann keinen eigenen Bild-Container.</p>` : "";
+        ${(() => { const bi = st.backend_info || {}; return bi.model ? `<p class="hint im-backend" style="margin-top:6px">MyrmidLM: <b>${esc(bi.label || bi.model)}</b> über ${bi.engine === "comfyui" ? "ComfyUI" : "stable-diffusion.cpp"}, Standardgröße ${esc(bi.size || "")}. Nach einem Modell- oder Engine-Wechsel in MyrmidLM hier erneut speichern.</p>` : ""; })()}
+        <div class="im-comfy" style="margin-top:8px">
+          <p class="hint">Leer lassen für den Standard-Workflow des Modells auf MyrmidLM. Eigener Workflow: in ComfyUI (MyrmidLM-Master unter <code>/comfy/</code>) bauen, mit „Export (API)“ speichern und hier einfügen; dazu die Knoten-Zuordnung, z. B. <code>[{"type":"prompt","key":"text","node_ids":["6"]},{"type":"width","key":"width","node_ids":["5"]},{"type":"height","key":"height","node_ids":["5"]},{"type":"seed","key":"seed","node_ids":["3"]}]</code>.</p>
+          <textarea data-im="workflow" rows="5" style="width:100%;font-family:monospace;font-size:12px" placeholder="Workflow (API-JSON), leer = Standard von MyrmidLM">${esc(st.workflow || "")}</textarea>
+          <textarea data-im="nodes" rows="2" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px" placeholder="Knoten-Zuordnung (JSON-Liste), leer = Standard von MyrmidLM">${esc(st.nodes || "")}</textarea>
+        </div>
+        <p class="hint" style="margin-top:6px">Auf der CPU dauert ein Bild je nach Modell 20 Sekunden bis wenige Minuten. Das Modell (2 bis 7 GB) wird beim ersten Start einmalig geladen. Im Chat über das Bild-Symbol unter dem Eingabefeld nutzen.<br>Mit „dem Modell-Backend (MyrmidLM)“ läuft das Bildmodell auf einem MyrmidLM-Host: dort im Dashboard auf der Karte des Hosts unter „Bilder“ Engine (stable-diffusion.cpp oder ComfyUI), Modell und GPU wählen (ab MyrmidLM 2.16.0). Formica startet dann keinen eigenen Bild-Container.</p>` : "";
     const custom = x.custom ? `<button class="btn small" onclick="customEdit('${x.id}')">Bearbeiten</button><button class="btn small" onclick="customDelete('${x.id}')">Entfernen</button>` : "";
     return `<div class="card solx" data-sol="${x.id}">
       <div class="head"><div class="ico" style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--c2) 18%,transparent);color:var(--c2)">${ico(x.icon)}</div>
@@ -839,9 +848,12 @@ async function solRouting(id) {
 function imVis() {
   const m = document.querySelector('[data-im="mode"]'); if (!m) return;
   document.querySelectorAll(".im-ext").forEach((e) => e.classList.toggle("hidden", m.value !== "external"));
-  document.querySelectorAll(".im-local").forEach((e) => e.classList.toggle("hidden", m.value === "external"));
+  document.querySelectorAll(".im-local").forEach((e) => e.classList.toggle("hidden", m.value === "external" || m.value === "backend"));
+  document.querySelectorAll(".im-backend").forEach((e) => e.classList.toggle("hidden", m.value !== "backend"));
+  const a = document.querySelector('[data-im="api"]');
+  document.querySelectorAll(".im-comfy").forEach((e) => e.classList.toggle("hidden", m.value !== "backend" || !a || a.value !== "comfyui"));
 }
-$("s-list").addEventListener("change", (ev) => { if (ev.target.dataset.im === "mode") imVis(); });
+$("s-list").addEventListener("change", (ev) => { if (ev.target.dataset.im === "mode" || ev.target.dataset.im === "api") imVis(); });
 async function solFiles() {
   const r = await api("/api/solution/files", { settings: { keep_days: Number(document.querySelector("[data-fk]").value) } });
   if (!r.ok) return alert(r.error);
