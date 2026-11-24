@@ -1,5 +1,8 @@
 # Änderungen
 
+## 0.2.2
+- Adressen dürfen jetzt auch mit dem vollen Pfad eingetragen werden (…/v1/embeddings, …/v1/chat/completions): Formica nimmt die Basisadresse
+
 ## 0.2.1
 - Embeddings wählbar: auf diesem Server, über das Modell-Backend (MyrmidLM ab 2.14.0, GPU oder CPU im Cluster) oder eigene Adresse
 - Knopf „Embeddings testen“ zeigt Dimensionen und Antwortzeit

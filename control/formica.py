@@ -210,6 +210,8 @@ def normalize_backend_url(url: str) -> str:
         return ""
     if not re.match(r"^https?://", url):
         url = "http://" + url
+    # a full endpoint pasted in (…/v1/embeddings, …/v1/chat/completions): keep the base
+    url = re.sub(r"/(embeddings|chat/completions|completions|models)$", "", url).rstrip("/")
     if not url.endswith("/v1"):
         url += "/v1"
     return url
