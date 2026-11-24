@@ -349,7 +349,7 @@ def enabled_services(cfg: dict) -> list[str]:
                 continue
             if svc == "embeddings" and cfg["rag"]["embedding_source"] != "local":
                 continue
-            if svc in ("images", "images-model") and solution_conf(cfg, "images")["settings"]["mode"] == "external":
+            if svc in ("images", "images-model") and solution_conf(cfg, "images")["settings"]["mode"] in ("external", "backend"):
                 continue
             out.append(svc)
     out += ["custom-" + c["id"] for c in custom_solutions(cfg) if c.get("enabled", True)]
@@ -611,7 +611,9 @@ def render_compose(cfg: dict) -> dict:
     if im["enabled"]:
         ims = im["settings"]
         preset = IMAGE_MODELS.get(ims.get("model"), IMAGE_MODELS["sd15"])
-        if ims.get("mode") == "external":
+        if ims.get("mode") == "backend":  # MyrmidLM: a host's image model behind the master's /v1/images/...
+            base, key, model = cfg["backend"]["url"], cfg["backend"]["key"] or "none", ims.get("model") or "sd15"
+        elif ims.get("mode") == "external":
             base, key, model = normalize_backend_url(ims.get("url", "")), ims.get("key") or "none", ims.get("ext_model") or "dall-e-3"
         else:
             base, key, model = "http://images:1234/v1", "none", ims.get("model") or "sd15"
@@ -1004,7 +1006,9 @@ def solutions_status(cfg: dict) -> list[dict]:
         if not enabled:
             return "available"
         states = [svc.get(n, {}).get("state", "fehlt") for n in names if not n.endswith("-model")]
-        if states and all(x == "running" for x in states):
+        if not states:  # nothing of its own runs here (e.g. images on MyrmidLM or an external service)
+            return "running"
+        if all(x == "running" for x in states):
             return "running"
         if any(x == "running" for x in states):
             return "partial"
@@ -1780,7 +1784,7 @@ class Handler(BaseHTTPRequestHandler):
                     if sid == "files" and ds.get("keep_days") is not None:
                         st["keep_days"] = max(1, min(365, float(ds["keep_days"])))
                     if sid == "images":
-                        if ds.get("mode") in ("cpu", "cuda", "external"):
+                        if ds.get("mode") in ("cpu", "cuda", "external", "backend"):
                             st["mode"] = ds["mode"]
                         if ds.get("model") in IMAGE_MODELS:
                             st["model"] = ds["model"]

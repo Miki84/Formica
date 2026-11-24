@@ -801,14 +801,14 @@ async function loadSolutions() {
         <button class="btn small" onclick="solFiles()">Speichern</button>
         <span class="hint">Im Chat das Werkzeug „Dateien erzeugen“ einschalten (Symbol unter dem Eingabefeld) oder im Modell fest aktivieren.</span></div>` : "";
     const images = x.id === "images" ? `<div class="opts"><span class="small muted">Läuft auf</span>
-        <select data-im="mode"><option value="cpu"${st.mode === "cpu" ? " selected" : ""}>diesem Server (CPU)</option><option value="cuda"${st.mode === "cuda" ? " selected" : ""}>diesem Server (NVIDIA-GPU)</option><option value="external"${st.mode === "external" ? " selected" : ""}>externem Dienst (OpenAI-kompatibel)</option></select>
-        <select data-im="model" class="im-local">${Object.entries(IMODELS).map(([k, l]) => `<option value="${k}"${k === st.model ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <select data-im="mode"><option value="backend"${st.mode === "backend" ? " selected" : ""}>dem Modell-Backend (MyrmidLM)</option><option value="cpu"${st.mode === "cpu" ? " selected" : ""}>diesem Server (CPU)</option><option value="cuda"${st.mode === "cuda" ? " selected" : ""}>diesem Server (NVIDIA-GPU)</option><option value="external"${st.mode === "external" ? " selected" : ""}>externem Dienst (OpenAI-kompatibel)</option></select>
+        <select data-im="model" class="im-local" title="Bei MyrmidLM entscheidet das dort gewählte Modell, dieser Wert setzt nur die Standardgröße.">${Object.entries(IMODELS).map(([k, l]) => `<option value="${k}"${k === st.model ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
         <input type="text" data-im="url" class="im-ext" value="${esc(st.url || "")}" placeholder="http://server:1234/v1">
         <input type="password" data-im="key" class="im-ext" placeholder="${st.key_set ? "Key gespeichert" : "API-Key (optional)"}">
         <input type="text" data-im="ext_model" class="im-ext" value="${esc(st.ext_model || "")}" placeholder="Modellname">
         <input type="text" data-im="size" value="${esc(st.size || "")}" placeholder="Größe, z. B. 512x512" style="max-width:150px">
         <button class="btn small" onclick="solImages()">Speichern</button></div>
-        <p class="hint" style="margin-top:6px">Auf der CPU dauert ein Bild je nach Modell 20 Sekunden bis wenige Minuten. Das Modell (2 bis 7 GB) wird beim ersten Start einmalig geladen. Im Chat über das Bild-Symbol unter dem Eingabefeld nutzen.</p>` : "";
+        <p class="hint" style="margin-top:6px">Auf der CPU dauert ein Bild je nach Modell 20 Sekunden bis wenige Minuten. Das Modell (2 bis 7 GB) wird beim ersten Start einmalig geladen. Im Chat über das Bild-Symbol unter dem Eingabefeld nutzen.<br>Mit „dem Modell-Backend (MyrmidLM)“ läuft das Bildmodell auf einem MyrmidLM-Host: dort im Dashboard auf der Karte des Hosts unter „Bilder“ das Modell und CPU oder GPU wählen (ab MyrmidLM 2.15.0). Formica startet dann keinen eigenen Bild-Container.</p>` : "";
     const custom = x.custom ? `<button class="btn small" onclick="customEdit('${x.id}')">Bearbeiten</button><button class="btn small" onclick="customDelete('${x.id}')">Entfernen</button>` : "";
     return `<div class="card solx" data-sol="${x.id}">
       <div class="head"><div class="ico" style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--c2) 18%,transparent);color:var(--c2)">${ico(x.icon)}</div>

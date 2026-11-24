@@ -1,5 +1,8 @@
 # Änderungen
 
+## 0.4.1
+- Bilder erzeugen „über das Modell-Backend (MyrmidLM)“: das Bildmodell läuft auf einem MyrmidLM-Host (CPU oder eigene GPU, ab MyrmidLM 2.15.0), Open WebUI nutzt `/v1/images/generations` des Masters mit dessen Key. Formica startet dann keinen eigenen Bild-Container.
+
 ## 0.4.0
 - Neue Lösung „Dateien erzeugen“: Open WebUI erstellt Excel (.xlsx), Word (.docx), PDF und CSV direkt aus dem Chat und gibt einen Download-Link zurück. Zahlen werden als Zahlen übernommen, auch im deutschen Format (11,25); Dateien werden nach einstellbarer Zeit gelöscht. Wird automatisch als Werkzeug in Open WebUI eingetragen.
 - Neue Lösung „Bilder erzeugen“: Stable Diffusion über stable-diffusion.cpp (sd-server) auf der CPU oder einer NVIDIA-GPU, Modell wählbar (SD 1.5, SD Turbo, SDXL Turbo, wird einmalig geladen), oder ein externer OpenAI-kompatibler Bilddienst
